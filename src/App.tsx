@@ -100,7 +100,25 @@ function App() {
   const [error, setError] = useState<string>('');
   const [placementMode, setPlacementMode] = useState<'trap' | 'turret' | 'mine'>('trap');
   const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info'>('units');
+  const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 600 });
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Handle window resize for responsive canvas
+  useEffect(() => {
+    const handleResize = () => {
+      const maxWidth = window.innerWidth - 320; // Account for side panel
+      const maxHeight = window.innerHeight - 20; // Account for padding
+      setCanvasSize({
+        width: Math.min(1200, maxWidth),
+        height: Math.min(600, maxHeight)
+      });
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Initial call
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     console.log('Setting up socket connection...');
@@ -159,7 +177,7 @@ function App() {
     }
   }, []);
 
-  // Canvas rendering - only re-render when gameState changes
+  // Canvas rendering - only re-render when gameState or canvas size changes
   useEffect(() => {
     if (!gameState || !canvasRef.current) return;
 
@@ -168,20 +186,30 @@ function App() {
     if (!ctx) return;
 
     try {
-      // Clear canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Calculate scaling factors based on standard 1200x600 game coordinates
+      const STANDARD_WIDTH = 1200;
+      const STANDARD_HEIGHT = 600;
+      const scaleX = canvas.width / STANDARD_WIDTH;
+      const scaleY = canvas.height / STANDARD_HEIGHT;
+
+      // Apply scaling transformation
+      ctx.save();
+      ctx.scale(scaleX, scaleY);
+
+      // Clear canvas (using standard dimensions since we're scaled)
+      ctx.clearRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
       
       // Draw battlefield background
       ctx.fillStyle = '#2d4a22';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
       
       // Draw center line
       ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
       ctx.setLineDash([10, 10]);
       ctx.beginPath();
-      ctx.moveTo(canvas.width / 2, 0);
-      ctx.lineTo(canvas.width / 2, canvas.height);
+      ctx.moveTo(STANDARD_WIDTH / 2, 0);
+      ctx.lineTo(STANDARD_WIDTH / 2, STANDARD_HEIGHT);
       ctx.stroke();
       ctx.setLineDash([]);
 
@@ -1409,10 +1437,13 @@ function App() {
           }
         });
       }
+      
+      // Restore the scaling transformation
+      ctx.restore();
     } catch (err) {
       console.error('Canvas rendering error:', err);
     }
-  }, [gameState]); // Re-render whenever gameState changes
+  }, [gameState, canvasSize]); // Re-render whenever gameState or canvas size changes
 
   const joinGame = () => {
     console.log('Joining game:', { gameId, playerName });
@@ -1478,39 +1509,39 @@ function App() {
     
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
     
-    // Check if click is on player's own half
-    const CANVAS_WIDTH = 1200;
-    const playerHalfStart = playerIndex === 0 ? 0 : CANVAS_WIDTH / 2;
-    const playerHalfEnd = playerIndex === 0 ? CANVAS_WIDTH / 2 : CANVAS_WIDTH;
+    // Convert canvas display coordinates to actual canvas coordinates
+    const canvasX = (clickX / rect.width) * canvas.width;
+    const canvasY = (clickY / rect.height) * canvas.height;
     
-    if (x >= playerHalfStart && x <= playerHalfEnd) {
-      // Place structure based on current placement mode
+    // Convert canvas coordinates to game coordinates (1200x600 standard)
+    const STANDARD_WIDTH = 1200;
+    const STANDARD_HEIGHT = 600;
+    const scaleX = canvas.width / STANDARD_WIDTH;
+    const scaleY = canvas.height / STANDARD_HEIGHT;
+    
+    const gameX = canvasX / scaleX;
+    const gameY = canvasY / scaleY;
+    
+    // Check if click is on player's own half using standard game dimensions
+    const playerHalfStart = playerIndex === 0 ? 0 : STANDARD_WIDTH / 2;
+    const playerHalfEnd = playerIndex === 0 ? STANDARD_WIDTH / 2 : STANDARD_WIDTH;
+    
+    if (gameX >= playerHalfStart && gameX <= playerHalfEnd) {
+      // Place structure based on current placement mode using game coordinates
       if (placementMode === 'trap') {
-        placeTrap(x, y);
+        placeTrap(gameX, gameY);
       } else if (placementMode === 'turret') {
-        placeTurret(x, y);
+        placeTurret(gameX, gameY);
       } else if (placementMode === 'mine') {
-        placeMine(x, y);
+        placeMine(gameX, gameY);
       }
     }
   };
 
-  const getCurrentPlayerInfo = () => {
-    if (!gameState || gameState.players.length === 0) return '';
-    
-    if (gameState.gameOver) {
-      if (gameState.winner) {
-        return `Game Over! ${gameState.winner.name} wins!`;
-      } else {
-        return "Game Over! It's a tie!";
-      }
-    }
-    
-    return 'Deploy Units'
-  };
+
 
   const LANES = [0, 1, 2];
 
@@ -1563,20 +1594,20 @@ function App() {
   
   return (
     <div className="app">
-      <h1>The game of game</h1>
-      
-      {error && (
-        <div style={{color: 'red', padding: '1rem', background: '#ffe6e6', border: '1px solid red', borderRadius: '0.5rem', margin: '1rem 0'}}>
-          Error: {error}
-        </div>
-      )}
-      
-      <div className="connection-status">
-        Status: {connectionStatus}
-      </div>
-
       {!gameState ? (
-        <div>
+        <div className="join-screen">
+          <div className="join-header">
+            <h1>Battle Arena</h1>
+            {error && (
+              <div style={{color: 'red', padding: '0.5rem', background: '#ffe6e6', border: '1px solid red', borderRadius: '0.5rem', margin: '0.5rem 0', fontSize: '0.9rem'}}>
+                Error: {error}
+              </div>
+            )}
+            <div className="connection-status" style={{fontSize: '0.9rem', padding: '0.25rem 0.5rem'}}>
+              Status: {connectionStatus}
+            </div>
+          </div>
+          
           <div className="join-form">
             <input
               type="text"
@@ -1599,222 +1630,223 @@ function App() {
           </p>
         </div>
       ) : (
-        <div>
-          <div className="game-container">
-            <div className="side-panel">
-              <div className="game-info-compact">
-                <h2>Battle: {gameId}</h2>
-                <div className="players-compact">
-                  {gameState.players.map((player, index) => (
-                    <div key={player.id} className={`player-compact ${index === playerIndex ? 'you' : ''}`}>
-                      {player.name} {index === playerIndex && '(You)'}
-                    </div>
-                  ))}
-                  {gameState.players.length < 2 && (
-                    <div className="waiting-compact">Waiting...</div>
-                  )}
-                </div>
-                
-                {gameState.players.length === 2 && (
-                  <div className="game-stats-compact">
-                    <div className="stat-compact">💰 {getMyResources()}</div>
-                    <div className="stat-compact">⚡ {getProduction()}/s</div>
-                    <div className="stat-compact">🏰 {getMyBaseHealth().health}/{getMyBaseHealth().maxHealth}</div>
-                    <div className="stat-compact">📍 Lane {getMySelectedLane()+1}</div>
+        <div className="game-container">
+          <div className="side-panel">
+            <div className="game-header-compact">
+              <div className="game-title">⚔️ Battle Arena</div>
+            </div>
+            <div className="game-info-compact">
+              <h2>Battle: {gameId}</h2>
+              <div className="players-compact">
+                {gameState.players.map((player, index) => (
+                  <div key={player.id} className={`player-compact ${index === playerIndex ? 'you' : ''}`}>
+                    {player.name} {index === playerIndex && '(You)'}
                   </div>
+                ))}
+                {gameState.players.length < 2 && (
+                  <div className="waiting-compact">Waiting...</div>
                 )}
               </div>
               
-              {gameState.players.length === 2 && !gameState.gameOver && (
-                <div className="control-panel-compact">
-                  <div className="tab-navigation-compact">
-                    <button 
-                      className={`tab-btn-compact ${activeTab === 'units' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('units')}
-                    >
-                      ⚔️
-                    </button>
-                    <button 
-                      className={`tab-btn-compact ${activeTab === 'defense' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('defense')}
-                    >
-                      🛡️
-                    </button>
-                    <button 
-                      className={`tab-btn-compact ${activeTab === 'info' ? 'active' : ''}`}
-                      onClick={() => setActiveTab('info')}
-                    >
-                      📊
-                    </button>
-                  </div>
-
-                  <div className="tab-content-compact">
-                    {activeTab === 'units' && (
-                      <div className="units-tab-compact">
-                        <div className="unit-list-compact">
-                          <div className="unit-item-compact">
-                            <span className="unit-name-compact">⚒️ Peasant</span>
-                            <span className="unit-cost-compact">25</span>
-                            <button 
-                              className="deploy-btn-compact" 
-                              onClick={() => spawnUnit('Peasant')}
-                              disabled={getMyResources() < 25}
-                            >
-                              Deploy
-                            </button>
-                          </div>
-                          
-                          <div className="unit-item-compact">
-                            <span className="unit-name-compact">⚔️ Knight</span>
-                            <span className="unit-cost-compact">150</span>
-                            <button 
-                              className="deploy-btn-compact" 
-                              onClick={() => spawnUnit('Knight')}
-                              disabled={getMyResources() < 150}
-                            >
-                              Deploy
-                            </button>
-                          </div>
-                          
-                          <div className="unit-item-compact">
-                            <span className="unit-name-compact">🏹 Archer</span>
-                            <span className="unit-cost-compact">350</span>
-                            <button 
-                              className="deploy-btn-compact" 
-                              onClick={() => spawnUnit('Archer')}
-                              disabled={getMyResources() < 350}
-                            >
-                              Deploy
-                            </button>
-                          </div>
-                          
-                          <div className="unit-item-compact">
-                            <span className="unit-name-compact">👑 King</span>
-                            <span className="unit-cost-compact">500</span>
-                            <button 
-                              className="deploy-btn-compact" 
-                              onClick={() => spawnUnit('King')}
-                              disabled={getMyResources() < 500}
-                            >
-                              Deploy
-                            </button>
-                          </div>
-                          
-                          <div className="unit-item-compact">
-                            <span className="unit-name-compact">🔮 Wizard</span>
-                            <span className="unit-cost-compact">400</span>
-                            <button 
-                              className="deploy-btn-compact" 
-                              onClick={() => spawnUnit('Wizard')}
-                              disabled={getMyResources() < 400}
-                            >
-                              Deploy
-                            </button>
-                          </div>
-                        </div>
-                        
-                        <div className="lane-selector-compact">
-                          <div className="lane-label-compact">Lane:</div>
-                          <div className="lane-buttons-compact">
-                            {LANES.map((lane) => (
-                              <button
-                                key={lane}
-                                className={`lane-btn-compact${mySelectedLane === lane ? ' selected' : ''}`}
-                                onClick={() => selectLane(lane)}
-                              >
-                                {lane + 1}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {activeTab === 'defense' && (
-                      <div className="defense-tab-compact">
-                        <div className="defense-info-compact">
-                          🎯 Click battlefield to place {placementMode}s
-                        </div>
-                        
-                        <div className="defense-list-compact">
-                          <div className={`defense-item-compact ${placementMode === 'trap' ? 'selected' : ''}`}>
-                            <span className="defense-name-compact">🕳️ Trap</span>
-                            <span className="defense-cost-compact">50</span>
-                            <button 
-                              className="defense-btn-compact" 
-                              onClick={() => setPlacementMode('trap')}
-                            >
-                              {placementMode === 'trap' ? '✓' : 'Select'}
-                            </button>
-                          </div>
-                          
-                          <div className={`defense-item-compact ${placementMode === 'turret' ? 'selected' : ''}`}>
-                            <span className="defense-name-compact">🗼 Turret</span>
-                            <span className="defense-cost-compact">125</span>
-                            <button 
-                              className="defense-btn-compact" 
-                              onClick={() => setPlacementMode('turret')}
-                            >
-                              {placementMode === 'turret' ? '✓' : 'Select'}
-                            </button>
-                          </div>
-                          
-                          <div className={`defense-item-compact ${placementMode === 'mine' ? 'selected' : ''}`}>
-                            <span className="defense-name-compact">💣 Mine</span>
-                            <span className="defense-cost-compact">75</span>
-                            <button 
-                              className="defense-btn-compact" 
-                              onClick={() => setPlacementMode('mine')}
-                            >
-                              {placementMode === 'mine' ? '✓' : 'Select'}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {activeTab === 'info' && (
-                      <div className="info-tab-compact">
-                        <div className="info-section-compact">
-                          <h4>Abilities</h4>
-                          <div className="ability-list-compact">
-                            <div>🛡️ Knight: -20% damage</div>
-                            <div>🎯 Archer: +15% crit</div>
-                            <div>👑 King: +30% aura</div>
-                            <div>⚡ Wizard: Chain lightning</div>
-                          </div>
-                        </div>
-                        
-                        <div className="info-section-compact">
-                          <h4>Stats</h4>
-                          <div>Production: {getProduction()}/s</div>
-                          <div>Units: {gameState.units.filter(u => u.playerId === gameState.players[playerIndex]?.id).length}</div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {gameState.gameOver && (
-                <div className="game-over-compact">
-                  <button className="reset-btn-compact" onClick={() => socket?.emit('reset-game', { gameId })}>
-                    🔄 New Battle
-                  </button>
+              {gameState.players.length === 2 && (
+                <div className="game-stats-compact">
+                  <div className="stat-compact">💰 {getMyResources()}</div>
+                  <div className="stat-compact">⚡ {getProduction()}/s</div>
+                  <div className="stat-compact">🏰 {getMyBaseHealth().health}/{getMyBaseHealth().maxHealth}</div>
+                  <div className="stat-compact">📍 Lane {getMySelectedLane()+1}</div>
                 </div>
               )}
             </div>
             
-            <div className="battlefield-container">
-              <canvas 
-                ref={canvasRef} 
-                width={1200} 
-                height={600} 
-                className="battlefield-compact"
-                onClick={handleCanvasClick}
-                style={{ cursor: activeTab === 'defense' ? 'crosshair' : 'default' }}
-              />
-            </div>
+            {gameState.players.length === 2 && !gameState.gameOver && (
+              <div className="control-panel-compact">
+                <div className="tab-navigation-compact">
+                  <button 
+                    className={`tab-btn-compact ${activeTab === 'units' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('units')}
+                  >
+                    ⚔️
+                  </button>
+                  <button 
+                    className={`tab-btn-compact ${activeTab === 'defense' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('defense')}
+                  >
+                    🛡️
+                  </button>
+                  <button 
+                    className={`tab-btn-compact ${activeTab === 'info' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('info')}
+                  >
+                    📊
+                  </button>
+                </div>
+
+                <div className="tab-content-compact">
+                  {activeTab === 'units' && (
+                    <div className="units-tab-compact">
+                      <div className="unit-list-compact">
+                        <div className="unit-item-compact">
+                          <span className="unit-name-compact">⚒️ Peasant</span>
+                          <span className="unit-cost-compact">25</span>
+                          <button 
+                            className="deploy-btn-compact" 
+                            onClick={() => spawnUnit('Peasant')}
+                            disabled={getMyResources() < 25}
+                          >
+                            Deploy
+                          </button>
+                        </div>
+                        
+                        <div className="unit-item-compact">
+                          <span className="unit-name-compact">⚔️ Knight</span>
+                          <span className="unit-cost-compact">150</span>
+                          <button 
+                            className="deploy-btn-compact" 
+                            onClick={() => spawnUnit('Knight')}
+                            disabled={getMyResources() < 150}
+                          >
+                            Deploy
+                          </button>
+                        </div>
+                        
+                        <div className="unit-item-compact">
+                          <span className="unit-name-compact">🏹 Archer</span>
+                          <span className="unit-cost-compact">350</span>
+                          <button 
+                            className="deploy-btn-compact" 
+                            onClick={() => spawnUnit('Archer')}
+                            disabled={getMyResources() < 350}
+                          >
+                            Deploy
+                          </button>
+                        </div>
+                        
+                        <div className="unit-item-compact">
+                          <span className="unit-name-compact">👑 King</span>
+                          <span className="unit-cost-compact">500</span>
+                          <button 
+                            className="deploy-btn-compact" 
+                            onClick={() => spawnUnit('King')}
+                            disabled={getMyResources() < 500}
+                          >
+                            Deploy
+                          </button>
+                        </div>
+                        
+                        <div className="unit-item-compact">
+                          <span className="unit-name-compact">🔮 Wizard</span>
+                          <span className="unit-cost-compact">400</span>
+                          <button 
+                            className="deploy-btn-compact" 
+                            onClick={() => spawnUnit('Wizard')}
+                            disabled={getMyResources() < 400}
+                          >
+                            Deploy
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="lane-selector-compact">
+                        <div className="lane-label-compact">Lane:</div>
+                        <div className="lane-buttons-compact">
+                          {LANES.map((lane) => (
+                            <button
+                              key={lane}
+                              className={`lane-btn-compact${mySelectedLane === lane ? ' selected' : ''}`}
+                              onClick={() => selectLane(lane)}
+                            >
+                              {lane + 1}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'defense' && (
+                    <div className="defense-tab-compact">
+                      <div className="defense-info-compact">
+                        🎯 Click battlefield to place {placementMode}s
+                      </div>
+                      
+                      <div className="defense-list-compact">
+                        <div className={`defense-item-compact ${placementMode === 'trap' ? 'selected' : ''}`}>
+                          <span className="defense-name-compact">🕳️ Trap</span>
+                          <span className="defense-cost-compact">50</span>
+                          <button 
+                            className="defense-btn-compact" 
+                            onClick={() => setPlacementMode('trap')}
+                          >
+                            {placementMode === 'trap' ? '✓' : 'Select'}
+                          </button>
+                        </div>
+                        
+                        <div className={`defense-item-compact ${placementMode === 'turret' ? 'selected' : ''}`}>
+                          <span className="defense-name-compact">🗼 Turret</span>
+                          <span className="defense-cost-compact">125</span>
+                          <button 
+                            className="defense-btn-compact" 
+                            onClick={() => setPlacementMode('turret')}
+                          >
+                            {placementMode === 'turret' ? '✓' : 'Select'}
+                          </button>
+                        </div>
+                        
+                        <div className={`defense-item-compact ${placementMode === 'mine' ? 'selected' : ''}`}>
+                          <span className="defense-name-compact">💣 Mine</span>
+                          <span className="defense-cost-compact">75</span>
+                          <button 
+                            className="defense-btn-compact" 
+                            onClick={() => setPlacementMode('mine')}
+                          >
+                            {placementMode === 'mine' ? '✓' : 'Select'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'info' && (
+                    <div className="info-tab-compact">
+                      <div className="info-section-compact">
+                        <h4>Abilities</h4>
+                        <div className="ability-list-compact">
+                          <div>🛡️ Knight: -20% damage</div>
+                          <div>🎯 Archer: +15% crit</div>
+                          <div>👑 King: +30% aura</div>
+                          <div>⚡ Wizard: Chain lightning</div>
+                        </div>
+                      </div>
+                      
+                      <div className="info-section-compact">
+                        <h4>Stats</h4>
+                        <div>Production: {getProduction()}/s</div>
+                        <div>Units: {gameState.units.filter(u => u.playerId === gameState.players[playerIndex]?.id).length}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {gameState.gameOver && (
+              <div className="game-over-compact">
+                <button className="reset-btn-compact" onClick={() => socket?.emit('reset-game', { gameId })}>
+                  🔄 New Battle
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <div className="battlefield-container">
+            <canvas 
+              ref={canvasRef} 
+              width={canvasSize.width} 
+              height={canvasSize.height} 
+              className="battlefield-compact"
+              onClick={handleCanvasClick}
+              style={{ cursor: activeTab === 'defense' ? 'crosshair' : 'default' }}
+            />
           </div>
         </div>
       )}
