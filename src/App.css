@@ -17,6 +17,18 @@
   overflow: hidden;
 }
 
+/* Toast notification animation */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 .connection-status {
   padding: 0.5rem 1rem;
   border-radius: 0.5rem;

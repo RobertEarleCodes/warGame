@@ -31,19 +31,19 @@ class Game {
         this.gameOver = false;
         this.winner = null;
         this.playerResources = {};
-        this.playerSelectedLane = {}; // Fixed syntax error
+        this.playerSelectedLane = {};
         this.playerBases = {};
         this.lastResourceUpdate = Date.now();
         this.gameLoop = null;
-        this.baseAttackCooldowns = {}; // Track last attack time for each base
-        this.attackAnimations = []; // Track active attack animations
-        this.traps = []; // Track placed traps
-        this.turrets = []; // Track placed turrets
-        this.mines = []; // Track placed mines
-        this.turretAttackCooldowns = {}; // Track turret attack cooldowns
-        this.resourceGenerationRate = 10; // Start at 10 (slower)
-        this.resourceGenerationIncreaseInterval = 20000; // 20 seconds
+        this.baseAttackCooldowns = {};
+        this.attackAnimations = [];
+        this.traps = [];
+        this.turrets = [];
+        this.mines = [];        this.turretAttackCooldowns = {};
+        this.resourceGenerationRate = 10;
+        this.resourceGenerationIncreaseInterval = 20000;
         this.lastResourceIncrease = Date.now();
+        this.playerPowerups = {}; // Track powerups for each player
     }
 
     addPlayer(playerId, playerName) {
@@ -57,17 +57,22 @@ class Game {
                 name: playerName,
                 army: armyNames[this.players.length],
                 color: colors[this.players.length]
-            };
-
-            this.players.push(player);
+            };            this.players.push(player);
             this.playerResources[playerId] = 500; // Starting resources
             this.playerBases[playerId] = {
                 health: 1000,
                 maxHealth: 1000,
                 x: basePositions[this.players.length - 1],
-                y: 300 // Center of 600px height canvas (600/2 = 300)
-            };
+                y: 300, // Center of 600px height canvas (600/2 = 300)
+                level: 1,
+                weaponType: 'basic',
+                damage: 15,
+                attackRange: 120,
+                attackCooldown: 1200,
+                lastAttackTime: 0,
+                unlockedWeapons: ['basic']            };
             this.playerSelectedLane[playerId] = 0; // Default lane
+            this.initializePowerups(playerId); // Initialize powerups for the player
 
             // Start game loop when 2 players join
             if (this.players.length === 2 && !this.gameLoop) {
@@ -138,19 +143,18 @@ class Game {
             
             // Apply damage
             target.health = Math.max(0, target.health - chainDamage);
-            
-            // Check if target dies and award resources
+              // Check if target dies and award resources
             if (target.health <= 0) {
                 const targetIndex = this.units.indexOf(target);
                 if (targetIndex > -1) {
-                    const unitReward = {
-                        'Peasant': 10,
-                        'Knight': 40,
-                        'Archer': 80,
-                        'King': 150,
-                        'Wizard': 120
+                    const baseUnitReward = {
+                        'Peasant': 15,
+                        'Knight': 50,
+                        'Archer': 100,
+                        'King': 200,
+                        'Wizard': 150
                     };
-                    const reward = Math.floor((unitReward[target.unitType] || 10) * 0.5); // Half reward for chain kills
+                    const reward = Math.floor((baseUnitReward[target.unitType] || 15) * 0.5); // Half reward for chain kills
                     this.playerResources[wizard.playerId] = (this.playerResources[wizard.playerId] || 0) + reward;
                     
                     // Delay removal to allow animation
@@ -190,13 +194,13 @@ class Game {
 
         // Deduct resources and place trap
         this.playerResources[playerId] -= TRAP_COST;
-        
-        const trap = {
+          const trap = {
             id: `trap_${Date.now()}_${Math.random()}`,
             x: x,
             y: y,
             playerId: playerId,
             damage: 30,
+            level: 1,
             triggered: false,
             type: 'spike' // Could have different trap types later
         };
@@ -205,48 +209,535 @@ class Game {
         return true;
     }
 
-    placeTurret(playerId, x, y) {
-        const player = this.players.find(p => p.id === playerId);
-        if (!player) return false;
-
-        const playerIndex = this.players.findIndex(p => p.id === playerId);
-        const TURRET_COST = 125; // Cost to place a turret
-        
-        // Check if player has enough resources
-        if (this.playerResources[playerId] < TURRET_COST) return false;
-
-        // Check if position is on player's own half
-        const CANVAS_WIDTH = 1200;
-        const playerHalfStart = playerIndex === 0 ? 0 : CANVAS_WIDTH / 2;
-        const playerHalfEnd = playerIndex === 0 ? CANVAS_WIDTH / 2 : CANVAS_WIDTH;
-        
-        if (x < playerHalfStart || x > playerHalfEnd) return false;
-
-        // Check if there's already a structure at this location (within 40px)
-        const existingStructure = [...this.traps, ...this.turrets, ...this.mines].find(structure => 
-            Math.abs(structure.x - x) < 40 && Math.abs(structure.y - y) < 40
-        );
-        if (existingStructure) return false;
-
-        // Deduct resources and place turret
-        this.playerResources[playerId] -= TURRET_COST;
-        
-        const turret = {
-            id: `turret_${Date.now()}_${Math.random()}`,
-            x: x,
-            y: y,
-            playerId: playerId,
-            health: 100,
-            maxHealth: 100,
-            damage: 15,
-            attackRange: 140,
-            attackCooldown: 800,
-            lastAttackTime: 0,
-            type: 'turret'
+    placeTurret(playerId, x, y, turretType = 'basic') {
+        const turretCosts = {
+            basic: 50,
+            trebuchet: 100,
+            wizard: 150
         };
 
-        this.turrets.push(turret);
+        const cost = turretCosts[turretType] || 50;
+        
+        if (this.playerResources[playerId] >= cost) {
+            const turretId = `turret_${Date.now()}_${Math.random()}`;
+            
+            const turretStats = this.getTurretStats(turretType, 1);
+            
+            const turret = {
+                id: turretId,
+                x: x,
+                y: y,
+                playerId: playerId,
+                health: turretStats.health,
+                maxHealth: turretStats.maxHealth,
+                damage: turretStats.damage,
+                attackRange: turretStats.attackRange,
+                attackCooldown: turretStats.attackCooldown,
+                lastAttackTime: 0,
+                type: 'turret',
+                level: 1,
+                turretType: turretType,
+                splashRadius: turretStats.splashRadius,
+                chainLightningRange: turretStats.chainLightningRange,
+                chainLightningTargets: turretStats.chainLightningTargets
+            };
+            
+            this.turrets.push(turret);
+            this.playerResources[playerId] -= cost;
+            return true;
+        }
+        return false;
+    }
+
+    getTurretStats(turretType, level) {
+        const baseStats = {
+            basic: {
+                health: 100,
+                maxHealth: 100,
+                damage: 25,
+                attackRange: 150,
+                attackCooldown: 1000
+            },
+            trebuchet: {
+                health: 150,
+                maxHealth: 150,
+                damage: 60,
+                attackRange: 200,
+                attackCooldown: 2000,
+                splashRadius: 80
+            },
+            wizard: {
+                health: 80,
+                maxHealth: 80,
+                damage: 40,
+                attackRange: 180,
+                attackCooldown: 1500,
+                chainLightningRange: 100,
+                chainLightningTargets: 3
+            }
+        };
+
+        const stats = { ...baseStats[turretType] };
+        
+        // Scale stats with level
+        const multiplier = 1 + (level - 1) * 0.3; // 30% increase per level
+        stats.health = Math.floor(stats.health * multiplier);
+        stats.maxHealth = Math.floor(stats.maxHealth * multiplier);
+        stats.damage = Math.floor(stats.damage * multiplier);
+        stats.attackRange = Math.floor(stats.attackRange * (1 + (level - 1) * 0.1)); // 10% range increase per level
+
+        return stats;
+    }
+
+    upgradeTurret(playerId, turretId) {
+        const turret = this.turrets.find(t => t.id === turretId && t.playerId === playerId);
+        if (!turret) return false;
+
+        const upgradeCost = 30 * turret.level; // Cost increases with level
+        
+        if (this.playerResources[playerId] >= upgradeCost && turret.level < 5) {
+            turret.level++;
+            const newStats = this.getTurretStats(turret.turretType, turret.level);
+            
+            // Update turret stats
+            turret.maxHealth = newStats.maxHealth;
+            turret.health = newStats.maxHealth; // Full heal on upgrade
+            turret.damage = newStats.damage;
+            turret.attackRange = newStats.attackRange;
+            turret.splashRadius = newStats.splashRadius;
+            turret.chainLightningRange = newStats.chainLightningRange;
+            turret.chainLightningTargets = newStats.chainLightningTargets;
+            
+            this.playerResources[playerId] -= upgradeCost;
+            return true;        }
+        return false;
+    }
+
+    upgradeCastle(playerId) {
+        const castle = this.playerBases[playerId];
+        if (!castle) return false;
+
+        const upgradeCosts = [0, 200, 400, 800, 1600]; // Costs for levels 1->2, 2->3, etc.
+        const currentLevel = castle.level || 1;
+        
+        if (currentLevel >= 5) return false; // Max level
+        
+        const upgradeCost = upgradeCosts[currentLevel - 1] || 200;
+        
+        if (this.playerResources[playerId] >= upgradeCost) {
+            castle.level = currentLevel + 1;
+            
+            // Update castle stats based on level
+            const levelMultiplier = 1 + (castle.level - 1) * 0.4; // 40% increase per level
+            castle.maxHealth = Math.floor(1000 * levelMultiplier);
+            castle.health = castle.maxHealth; // Full heal on upgrade
+            castle.damage = Math.floor(15 * levelMultiplier);
+            castle.attackRange = Math.floor(120 * (1 + (castle.level - 1) * 0.15)); // 15% range increase per level
+            
+            // Unlock new weapons at certain levels
+            if (castle.level >= 2 && !castle.unlockedWeapons.includes('arrows')) {
+                castle.unlockedWeapons.push('arrows');
+            }
+            if (castle.level >= 3 && !castle.unlockedWeapons.includes('trebuchet')) {
+                castle.unlockedWeapons.push('trebuchet');
+            }
+            if (castle.level >= 4 && !castle.unlockedWeapons.includes('wizard')) {
+                castle.unlockedWeapons.push('wizard');
+            }
+            
+            this.playerResources[playerId] -= upgradeCost;
+            return true;
+        }
+        return false;
+    }
+
+    changeCastleWeapon(playerId, weaponType) {
+        const castle = this.playerBases[playerId];
+        if (!castle) return false;
+
+        // Check if weapon is unlocked
+        if (!castle.unlockedWeapons.includes(weaponType)) return false;
+
+        const weaponCosts = {
+            basic: 0,
+            arrows: 50,
+            trebuchet: 100,
+            wizard: 150
+        };
+
+        const cost = weaponCosts[weaponType] || 0;
+        
+        if (this.playerResources[playerId] >= cost) {
+            castle.weaponType = weaponType;
+            
+            // Update weapon-specific stats
+            const baseStats = this.getCastleWeaponStats(weaponType, castle.level);
+            castle.damage = baseStats.damage;
+            castle.attackRange = baseStats.attackRange;
+            castle.attackCooldown = baseStats.attackCooldown;
+            
+            this.playerResources[playerId] -= cost;
+            return true;
+        }
+        return false;
+    }
+
+    getCastleWeaponStats(weaponType, level) {
+        const baseStats = {
+            basic: {
+                damage: 15,
+                attackRange: 120,
+                attackCooldown: 1200
+            },
+            arrows: {
+                damage: 12,
+                attackRange: 180,
+                attackCooldown: 800
+            },
+            trebuchet: {
+                damage: 35,
+                attackRange: 200,
+                attackCooldown: 2500,
+                splashRadius: 60
+            },
+            wizard: {
+                damage: 25,
+                attackRange: 160,
+                attackCooldown: 1800,
+                chainLightningRange: 80,
+                chainLightningTargets: 2
+            }
+        };
+
+        const stats = { ...baseStats[weaponType] };
+        
+        // Scale with level
+        const multiplier = 1 + (level - 1) * 0.4;
+        stats.damage = Math.floor(stats.damage * multiplier);        stats.attackRange = Math.floor(stats.attackRange * (1 + (level - 1) * 0.15));
+          return stats;
+    }
+
+    // Powerups system
+    initializePowerups(playerId) {
+        this.playerPowerups[playerId] = {
+            peasant: {
+                enhancedTools: false,
+                hardyWorkers: false
+            },
+            knight: {
+                masterArmor: false,
+                battleCharge: false
+            },
+            archer: {
+                eagleEye: false,
+                piercingShots: false
+            },
+            king: {
+                royalAuthority: false,
+                divineProtection: false
+            },
+            wizard: {
+                arcLightning: false,
+                manaShield: false
+            }
+        };
+    }
+
+    purchasePowerup(playerId, unitType, powerupName) {
+        if (!this.playerPowerups[playerId]) {
+            this.initializePowerups(playerId);
+        }
+
+        const powerupCosts = {
+            peasant: {
+                enhancedTools: 150,
+                hardyWorkers: 200
+            },
+            knight: {
+                masterArmor: 300,
+                battleCharge: 400
+            },
+            archer: {
+                eagleEye: 350,
+                piercingShots: 450
+            },
+            king: {
+                royalAuthority: 500,
+                divineProtection: 600
+            },
+            wizard: {
+                arcLightning: 400,
+                manaShield: 550
+            }
+        };        const cost = powerupCosts[unitType]?.[powerupName];
+        if (!cost) return false;
+
+        // Check if powerup is already purchased
+        if (this.playerPowerups[playerId][unitType][powerupName]) return false;
+
+        // Check if player has enough resources
+        if (this.playerResources[playerId] < cost) return false;
+
+        // Purchase powerup
+        this.playerResources[playerId] -= cost;
+        this.playerPowerups[playerId][unitType][powerupName] = true;
+        
         return true;
+    }
+
+    getPowerupModifiers(playerId, unitType) {
+        if (!this.playerPowerups[playerId]) {
+            this.initializePowerups(playerId);
+        }
+
+        const powerups = this.playerPowerups[playerId];
+        let modifiers = {
+            damage: 1,
+            health: 1,
+            speed: 1,
+            armorReduction: 0,
+            criticalChance: 0,
+            chainLightningTargets: 0,
+            chainLightningRange: 0,
+            auraRange: 1,
+            auraDamageBonus: 0,
+            healthRegen: false,
+            immuneToCrits: false,
+            damageReflection: 0,
+            piercing: false
+        };
+
+        switch(unitType.toLowerCase()) {
+            case 'peasant':
+                if (powerups.peasant.enhancedTools) {
+                    modifiers.damage *= 1.5;
+                    modifiers.speed *= 1.25;
+                }
+                if (powerups.peasant.hardyWorkers) {
+                    modifiers.health *= 2;
+                }
+                break;
+            
+            case 'knight':
+                if (powerups.knight.masterArmor) {
+                    modifiers.armorReduction = 0.35; // Increased from 20% to 35%
+                }
+                if (powerups.knight.battleCharge) {
+                    // This will be applied conditionally when health < 50%
+                }
+                break;
+            
+            case 'archer':
+                if (powerups.archer.eagleEye) {
+                    modifiers.criticalChance = 0.25; // Increased from 15% to 25%
+                }
+                if (powerups.archer.piercingShots) {
+                    modifiers.piercing = true;
+                }
+                break;
+            
+            case 'king':
+                if (powerups.king.royalAuthority) {
+                    modifiers.auraRange = 1.5;
+                    modifiers.auraDamageBonus = 0.5; // Increased from 30% to 50%
+                }
+                if (powerups.king.divineProtection) {
+                    modifiers.immuneToCrits = true;
+                    modifiers.healthRegen = true;
+                }
+                break;
+            
+            case 'wizard':
+                if (powerups.wizard.arcLightning) {
+                    modifiers.chainLightningTargets = 2; // +2 additional targets
+                    modifiers.chainLightningRange = 1.5; // +50% range
+                }
+                if (powerups.wizard.manaShield) {
+                    modifiers.armorReduction = 0.4; // 40% damage reduction
+                    modifiers.damageReflection = 0.25; // 25% reflection
+                }
+                break;
+        }
+
+        return modifiers;
+    }
+
+    processCastleTrebuchetAttack(castle, target, attackTime) {
+        // Create boulder animation
+        this.createAttackAnimation(castle.x, castle.y, target.x, target.y, 'castle_boulder');
+        
+        // Splash damage
+        const weaponStats = this.getCastleWeaponStats(castle.weaponType, castle.level);
+        const splashRadius = weaponStats.splashRadius || 60;
+        
+        const affectedUnits = this.units.filter(unit => {
+            if (unit.playerId === castle.playerId) return false;
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            return distance <= splashRadius;
+        });
+        
+        affectedUnits.forEach(unit => {
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            const damageMultiplier = 1 - (distance / splashRadius) * 0.5;
+            unit.health -= Math.floor(castle.damage * damageMultiplier);
+        });
+    }
+
+    processCastleWizardAttack(castle, primaryTarget, attackTime) {
+        // Create lightning animation
+        this.createAttackAnimation(castle.x, castle.y, primaryTarget.x, primaryTarget.y, 'castle_lightning');
+        
+        // Primary target takes full damage
+        primaryTarget.health -= castle.damage;
+        
+        // Chain lightning to nearby enemies
+        const weaponStats = this.getCastleWeaponStats(castle.weaponType, castle.level);
+        const chainRange = weaponStats.chainLightningRange || 80;
+        const chainTargets = weaponStats.chainLightningTargets || 2;
+        
+        const hitTargets = [primaryTarget];
+        let currentTarget = primaryTarget;
+        
+        for (let i = 0; i < chainTargets - 1; i++) {
+            const nearbyEnemies = this.units.filter(unit => {
+                if (unit.playerId === castle.playerId) return false;
+                if (hitTargets.includes(unit)) return false;
+                
+                const distance = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                return distance <= chainRange;
+            });
+            
+            if (nearbyEnemies.length === 0) break;
+            
+            const nextTarget = nearbyEnemies.reduce((closest, unit) => {
+                const distToUnit = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                const distToClosest = Math.sqrt(
+                    Math.pow(closest.x - currentTarget.x, 2) + Math.pow(closest.y - currentTarget.y, 2)
+                );
+                return distToUnit < distToClosest ? unit : closest;
+            });
+            
+            const chainDamage = Math.floor(castle.damage * Math.pow(0.8, i + 1));
+            nextTarget.health -= chainDamage;
+            
+            this.createAttackAnimation(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y, 'castle_chain_lightning');
+            
+            hitTargets.push(nextTarget);
+            currentTarget = nextTarget;
+        }
+    }
+
+    updateTurretAttacks() {
+        const currentTime = Date.now();
+        
+        this.turrets.forEach(turret => {
+            if (currentTime - turret.lastAttackTime < turret.attackCooldown) return;
+            
+            // Find enemy units within range
+            const enemies = this.units.filter(unit => {
+                if (unit.playerId === turret.playerId) return false;
+                const distance = Math.sqrt(
+                    Math.pow(unit.x - turret.x, 2) + Math.pow(unit.y - turret.y, 2)
+                );
+                return distance <= turret.attackRange;
+            });
+            
+            if (enemies.length > 0) {
+                const target = enemies[0]; // Attack closest enemy
+                
+                if (turret.turretType === 'trebuchet') {
+                    this.processTrebuchetAttack(turret, target, currentTime);
+                } else if (turret.turretType === 'wizard') {
+                    this.processWizardAttack(turret, target, currentTime);
+                } else {
+                    // Basic turret attack
+                    target.health -= turret.damage;
+                    this.createAttackAnimation(turret.x, turret.y, target.x, target.y, 'projectile');
+                }
+                
+                turret.lastAttackTime = currentTime;
+            }
+        });
+        
+        // Remove dead units
+        this.units = this.units.filter(unit => unit.health > 0);
+    }
+
+    processTrebuchetAttack(turret, target, attackTime) {
+        // Create projectile animation
+        this.createAttackAnimation(turret.x, turret.y, target.x, target.y, 'boulder');
+        
+        // Splash damage
+        const affectedUnits = this.units.filter(unit => {
+            if (unit.playerId === turret.playerId) return false;
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            return distance <= turret.splashRadius;
+        });
+        
+        affectedUnits.forEach(unit => {
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            const damageMultiplier = 1 - (distance / turret.splashRadius) * 0.5; // Damage falls off with distance
+            unit.health -= Math.floor(turret.damage * damageMultiplier);
+        });
+    }
+
+    processWizardAttack(turret, primaryTarget, attackTime) {
+        // Create lightning animation
+        this.createAttackAnimation(turret.x, turret.y, primaryTarget.x, primaryTarget.y, 'lightning');
+        
+        // Primary target takes full damage
+        primaryTarget.health -= turret.damage;
+        
+        // Chain lightning to nearby enemies
+        const hitTargets = [primaryTarget];
+        let currentTarget = primaryTarget;
+        
+        for (let i = 0; i < turret.chainLightningTargets - 1; i++) {
+            const nearbyEnemies = this.units.filter(unit => {
+                if (unit.playerId === turret.playerId) return false;
+                if (hitTargets.includes(unit)) return false;
+                
+                const distance = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                return distance <= turret.chainLightningRange;
+            });
+            
+            if (nearbyEnemies.length === 0) break;
+            
+            // Find closest enemy
+            const nextTarget = nearbyEnemies.reduce((closest, unit) => {
+                const distToUnit = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                const distToClosest = Math.sqrt(
+                    Math.pow(closest.x - currentTarget.x, 2) + Math.pow(closest.y - currentTarget.y, 2)
+                );
+                return distToUnit < distToClosest ? unit : closest;
+            });
+            
+            // Chain damage reduces by 20% each jump
+            const chainDamage = Math.floor(turret.damage * Math.pow(0.8, i + 1));
+            nextTarget.health -= chainDamage;
+            
+            // Create chain lightning animation
+            this.createAttackAnimation(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y, 'chain_lightning');
+            
+            hitTargets.push(nextTarget);
+            currentTarget = nextTarget;
+        }
     }
 
     placeMine(playerId, x, y) {
@@ -274,14 +765,14 @@ class Game {
 
         // Deduct resources and place mine
         this.playerResources[playerId] -= MINE_COST;
-        
-        const mine = {
+          const mine = {
             id: `mine_${Date.now()}_${Math.random()}`,
             x: x,
             y: y,
             playerId: playerId,
             damage: 50,
             explosionRadius: 45,
+            level: 1,
             triggered: false,
             type: 'mine'
         };
@@ -372,92 +863,143 @@ class Game {
     }
 
     updateTurretAttacks() {
-        // Handle turret attacks
+        const currentTime = Date.now();
+        
         this.turrets.forEach(turret => {
-            // Find enemy units in range
-            const now = Date.now();
-            if (now - turret.lastAttackTime >= turret.attackCooldown) {
-                const enemyUnits = this.units.filter(unit => {
-                    if (unit.playerId === turret.playerId) return false;
-                    
-                    const distance = Math.sqrt(
-                        Math.pow(unit.x - turret.x, 2) + Math.pow(unit.y - turret.y, 2)
-                    );
-                    
-                    return distance <= turret.attackRange;
-                });
-
-                if (enemyUnits.length > 0) {
-                    // Attack the closest enemy unit
-                    let closest = enemyUnits[0];
-                    let minDist = Math.sqrt(
-                        Math.pow(closest.x - turret.x, 2) + Math.pow(closest.y - turret.y, 2)
-                    );
-                    
-                    for (const unit of enemyUnits) {
-                        const dist = Math.sqrt(
-                            Math.pow(unit.x - turret.x, 2) + Math.pow(unit.y - turret.y, 2)
-                        );
-                        if (dist < minDist) {
-                            closest = unit;
-                            minDist = dist;
-                        }
-                    }
-                    
-                    // Create turret attack animation
-                    this.createAttackAnimation(turret.x, turret.y, closest.x, closest.y, 'turret');
-                    
-                    closest.health = Math.max(0, closest.health - turret.damage);
-                    turret.lastAttackTime = now;
-
-                    // Remove unit if dead
-                    if (closest.health <= 0) {
-                        const idx = this.units.indexOf(closest);
-                        if (idx > -1) {
-                            // Award resources for kill
-                            const unitReward = {
-                                'Peasant': 10,
-                                'Knight': 40,
-                                'Archer': 80,
-                                'King': 150
-                            };
-                            const reward = unitReward[closest.unitType] || 10;
-                            this.playerResources[turret.playerId] = (this.playerResources[turret.playerId] || 0) + reward
-                            this.units.splice(idx, 1);
-                        }
-                    }
-                }
-            }
-        });
-
-        // Remove destroyed turrets (when units attack them)
-        this.turrets.forEach((turret, index) => {
-            this.units.forEach(unit => {
-                if (unit.playerId === turret.playerId) return;
-                
+            if (currentTime - turret.lastAttackTime < turret.attackCooldown) return;
+            
+            // Find enemy units within range
+            const enemies = this.units.filter(unit => {
+                if (unit.playerId === turret.playerId) return false;
                 const distance = Math.sqrt(
                     Math.pow(unit.x - turret.x, 2) + Math.pow(unit.y - turret.y, 2)
                 );
-                
-                // If unit is in range of turret, attack it
-                if (distance <= unit.attackRange) {
-                    const now = Date.now();
-                    if (now - unit.lastAttackTime >= unit.attackCooldown) {
-                        // Create attack animation
-                        const animationType = unit.attackRange > 100 ? 'projectile' : 'melee';
-                        this.createAttackAnimation(unit.x, unit.y, turret.x, turret.y, animationType);
-                        
-                        turret.health = Math.max(0, turret.health - unit.damage);
-                        unit.lastAttackTime = now;
-                        
-                        // Remove turret if destroyed
-                        if (turret.health <= 0) {
-                            this.turrets.splice(index, 1);
-                        }
-                    }
-                }
+                return distance <= turret.attackRange;
             });
+            
+            if (enemies.length > 0) {
+                const target = enemies[0]; // Attack closest enemy
+                
+                if (turret.turretType === 'trebuchet') {
+                    this.processTrebuchetAttack(turret, target, currentTime);
+                } else if (turret.turretType === 'wizard') {
+                    this.processWizardAttack(turret, target, currentTime);
+                } else {
+                    // Basic turret attack
+                    target.health -= turret.damage;
+                    this.createAttackAnimation(turret.x, turret.y, target.x, target.y, 'projectile');
+                }
+                
+                turret.lastAttackTime = currentTime;
+            }
         });
+        
+        // Remove dead units
+        this.units = this.units.filter(unit => unit.health > 0);
+    }
+
+    processTrebuchetAttack(turret, target, attackTime) {
+        // Create projectile animation
+        this.createAttackAnimation(turret.x, turret.y, target.x, target.y, 'boulder');
+        
+        // Splash damage
+        const affectedUnits = this.units.filter(unit => {
+            if (unit.playerId === turret.playerId) return false;
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            return distance <= turret.splashRadius;
+        });
+        
+        affectedUnits.forEach(unit => {
+            const distance = Math.sqrt(
+                Math.pow(unit.x - target.x, 2) + Math.pow(unit.y - target.y, 2)
+            );
+            const damageMultiplier = 1 - (distance / turret.splashRadius) * 0.5; // Damage falls off with distance
+            unit.health -= Math.floor(turret.damage * damageMultiplier);
+        });
+    }
+
+    processWizardAttack(turret, primaryTarget, attackTime) {
+        // Create lightning animation
+        this.createAttackAnimation(turret.x, turret.y, primaryTarget.x, primaryTarget.y, 'lightning');
+        
+        // Primary target takes full damage
+        primaryTarget.health -= turret.damage;
+        
+        // Chain lightning to nearby enemies
+        const hitTargets = [primaryTarget];
+        let currentTarget = primaryTarget;
+        
+        for (let i = 0; i < turret.chainLightningTargets - 1; i++) {
+            const nearbyEnemies = this.units.filter(unit => {
+                if (unit.playerId === turret.playerId) return false;
+                if (hitTargets.includes(unit)) return false;
+                
+                const distance = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                return distance <= turret.chainLightningRange;
+            });
+            
+            if (nearbyEnemies.length === 0) break;
+            
+            // Find closest enemy
+            const nextTarget = nearbyEnemies.reduce((closest, unit) => {
+                const distToUnit = Math.sqrt(
+                    Math.pow(unit.x - currentTarget.x, 2) + Math.pow(unit.y - currentTarget.y, 2)
+                );
+                const distToClosest = Math.sqrt(
+                    Math.pow(closest.x - currentTarget.x, 2) + Math.pow(closest.y - currentTarget.y, 2)
+                );
+                return distToUnit < distToClosest ? unit : closest;
+            });
+            
+            // Chain damage reduces by 20% each jump
+            const chainDamage = Math.floor(turret.damage * Math.pow(0.8, i + 1));
+            nextTarget.health -= chainDamage;
+            
+            // Create chain lightning animation
+            this.createAttackAnimation(currentTarget.x, currentTarget.y, nextTarget.x, nextTarget.y, 'chain_lightning');
+            
+            hitTargets.push(nextTarget);
+            currentTarget = nextTarget;
+        }
+    }
+
+    upgradeTrap(playerId, trapId) {
+        const trap = this.traps.find(t => t.id === trapId && t.playerId === playerId);
+        if (!trap) return false;
+
+        const upgradeCost = 20 * trap.level; // Cost increases with level
+        
+        if (this.playerResources[playerId] >= upgradeCost && trap.level < 5) {
+            trap.level++;
+            // Increase damage by 15 per level
+            trap.damage = 30 + (trap.level - 1) * 15;
+            
+            this.playerResources[playerId] -= upgradeCost;
+            return true;
+        }
+        return false;
+    }
+
+    upgradeMine(playerId, mineId) {
+        const mine = this.mines.find(m => m.id === mineId && m.playerId === playerId);
+        if (!mine) return false;
+
+        const upgradeCost = 25 * mine.level; // Cost increases with level
+        
+        if (this.playerResources[playerId] >= upgradeCost && mine.level < 5) {
+            mine.level++;
+            // Increase damage and explosion radius per level
+            mine.damage = 50 + (mine.level - 1) * 20;
+            mine.explosionRadius = 45 + (mine.level - 1) * 10;
+            
+            this.playerResources[playerId] -= upgradeCost;
+            return true;
+        }
+        return false;
     }
 
     startGameLoop() {
@@ -484,29 +1026,44 @@ class Game {
         this.checkMineCollisions();
 
         // Update turret attacks
-        this.updateTurretAttacks();
-
-        // === Increase resource generation rate by 0.5 every 2 seconds (slower) ===
+        this.updateTurretAttacks();        // === Increase resource generation rate by 0.1 every 10 seconds (much slower) ===
         const now = Date.now();
-        if (now - this.lastResourceIncrease > 2000) { // Every 2 seconds
-            this.resourceGenerationRate += 0.5; // Slower increase
+        if (now - this.lastResourceIncrease > 10000) { // Every 10 seconds
+            this.resourceGenerationRate += 0.1; // Much slower increase
             this.lastResourceIncrease = now;
         }
 
         // === Generate resources over time ===
         if (now - this.lastResourceUpdate > 1000) { // Every second
             this.players.forEach(player => {
+                let playerGenerationRate = this.resourceGenerationRate;
+                
+                // Bonus production based on units
+                const playerUnits = this.units.filter(u => u.playerId === player.id);
+                const peasantCount = playerUnits.filter(u => u.unitType === 'Peasant').length;
+                
+                // Hardy Workers powerup: +10% resource generation per Peasant
+                if (this.playerPowerups[player.id]?.peasant?.hardyWorkers) {
+                    playerGenerationRate += peasantCount * (this.resourceGenerationRate * 0.1);
+                }
+                
+                // Base bonus for having units
+                playerGenerationRate += playerUnits.length * 0.5;
+                
                 this.playerResources[player.id] =
-                    (this.playerResources[player.id] || 0) + this.resourceGenerationRate;
+                    (this.playerResources[player.id] || 0) + Math.floor(playerGenerationRate);
             });
             this.lastResourceUpdate = now;
-        }
-
-        // Move units and handle combat
+        }// Move units and handle combat
         this.units.forEach((unit, index) => {
             const player = this.players.find(p => p.id === unit.playerId);
             const enemyPlayer = this.players.find(p => p.id !== unit.playerId);
             if (!player || !enemyPlayer) return;
+
+            // Health regeneration for units with the powerup
+            if (unit.healthRegen && unit.health < unit.maxHealth) {
+                unit.health = Math.min(unit.maxHealth, unit.health + 1); // Regenerate 1 HP per update
+            }
 
             // Find targets (enemy units or base)
             let target = null;
@@ -535,14 +1092,19 @@ class Game {
                 }
             }
 
-            if (target === 'base') {
-                // Attack enemy base (with cooldown)
+            if (target === 'base') {                // Attack enemy base (with cooldown)
                 const now = Date.now();
                 if (now - unit.lastAttackTime >= unit.attackCooldown) {
                     const enemyBase = this.playerBases[enemyPlayer.id];
                     
-                    // Create attack animation
-                    const animationType = unit.attackRange > 100 ? 'projectile' : 'melee';
+                    // Create attack animation based on unit type
+                    let animationType = 'melee';
+                    if (unit.unitType === 'Archer') {
+                        animationType = 'archer_arrow';
+                    } else if (unit.attackRange > 100) {
+                        animationType = 'projectile';
+                    }
+                    
                     this.createAttackAnimation(unit.x, unit.y, enemyBase.x, enemyBase.y, animationType);
                     
                     enemyBase.health = Math.max(0, enemyBase.health - unit.damage);
@@ -554,15 +1116,19 @@ class Game {
                         this.stopGameLoop();
                     }
                 }
-            } else if (target) {
-                // Attack enemy unit (with cooldown)
+            } else if (target) {                // Attack enemy unit (with cooldown)
                 const now = Date.now();
                 if (now - unit.lastAttackTime >= unit.attackCooldown) {
-                    // Create attack animation
-                    const animationType = unit.attackRange > 100 ? 'projectile' : 'melee';
-                    this.createAttackAnimation(unit.x, unit.y, target.x, target.y, animationType);
+                    // Create attack animation based on unit type
+                    let animationType = 'melee';
+                    if (unit.unitType === 'Archer') {
+                        animationType = 'archer_arrow';
+                    } else if (unit.attackRange > 100) {
+                        animationType = 'projectile';
+                    }
                     
-                    // Calculate enhanced damage with special abilities
+                    this.createAttackAnimation(unit.x, unit.y, target.x, target.y, animationType);
+                      // Calculate enhanced damage with special abilities and powerups
                     let finalDamage = unit.damage;
                     
                     // King Aura Bonus: Increase damage if near friendly King
@@ -570,24 +1136,45 @@ class Game {
                         ally.playerId === unit.playerId && 
                         ally.unitType === 'King' && 
                         ally.id !== unit.id &&
-                        Math.sqrt(Math.pow(ally.x - unit.x, 2) + Math.pow(ally.y - unit.y, 2)) <= 80
+                        Math.sqrt(Math.pow(ally.x - unit.x, 2) + Math.pow(ally.y - unit.y, 2)) <= (unit.auraRange || 80)
                     );
                     if (nearbyKings.length > 0) {
-                        finalDamage *= 1.3; // 30% damage bonus
+                        const auraBonus = nearbyKings[0].auraDamageBonus || 0.3;
+                        finalDamage *= (1 + auraBonus); // Apply aura bonus
                         // Create aura effect animation
                         this.createAttackAnimation(unit.x, unit.y, unit.x, unit.y, 'aura_boost');
                     }
                     
-                    // Archer Critical Hit: 15% chance for double damage
-                    if (unit.unitType === 'Archer' && Math.random() < 0.15) {
+                    // Critical Hit system (Archers and powerup-enhanced units)
+                    const critChance = unit.criticalChance || 0;
+                    if (critChance > 0 && Math.random() < critChance && !target.immuneToCrits) {
                         finalDamage *= 2;
                         // Create critical hit animation
                         this.createAttackAnimation(unit.x, unit.y, target.x, target.y, 'critical_hit');
                     }
                     
-                    // Knight Armor: Reduce incoming damage by 20%
-                    if (target.unitType === 'Knight') {
-                        finalDamage *= 0.8; // 20% damage reduction
+                    // Battle Charge: Knight powerup for low health bonus
+                    if (unit.unitType === 'Knight' && unit.health < unit.maxHealth * 0.5) {
+                        // Check if the knight has the battle charge powerup
+                        const modifiers = this.getPowerupModifiers(unit.playerId, 'Knight');
+                        if (this.playerPowerups[unit.playerId]?.knight?.battleCharge) {
+                            finalDamage *= 1.25; // +25% damage
+                            unit.speed = unit.speed * 1.5; // +50% speed (temporary)
+                        }
+                    }
+                    
+                    // Armor system with powerup enhancements
+                    let armorReduction = target.armorReduction || 0;
+                    if (armorReduction > 0) {
+                        finalDamage *= (1 - armorReduction);
+                    }
+                    
+                    // Damage reflection (Wizard powerup)
+                    if (target.damageReflection && target.damageReflection > 0) {
+                        const reflectedDamage = Math.floor(finalDamage * target.damageReflection);
+                        unit.health = Math.max(0, unit.health - reflectedDamage);
+                        // Create reflection animation
+                        this.createAttackAnimation(target.x, target.y, unit.x, unit.y, 'damage_reflection');
                     }
                     
                     // Apply final damage to primary target
@@ -598,20 +1185,35 @@ class Game {
                     if (unit.unitType === 'Wizard' && unit.chainLightningRange && unit.chainLightningTargets) {
                         this.processChainLightning(unit, target, now);
                     }
-                    
-                    if (target.health <= 0) {
+                      if (target.health <= 0) {
                         const targetIndex = this.units.indexOf(target);
                         if (targetIndex > -1) {
-                            // === Award resources for kill ===
-                            const unitReward = {
-                                'Peasant': 10,
-                                'Knight': 40,
-                                'Archer': 80,
-                                'King': 150,
-                                'Wizard': 120
+                            // === Enhanced reward system for kills ===
+                            const baseUnitReward = {
+                                'Peasant': 15,   // Increased from 10
+                                'Knight': 50,    // Increased from 40
+                                'Archer': 100,   // Increased from 80
+                                'King': 200,     // Increased from 150
+                                'Wizard': 150    // Increased from 120
                             };
-                            const reward = unitReward[target.unitType] || 10;
-                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward
+                            
+                            let reward = baseUnitReward[target.unitType] || 15;
+                            
+                            // Bonus for high-value target kills
+                            if (target.unitType === 'King') {
+                                reward += 50; // Extra bonus for killing a King
+                                // Create special animation for king kill
+                                this.createAttackAnimation(target.x, target.y, target.x, target.y, 'king_kill_bonus');
+                            } else if (target.unitType === 'Wizard') {
+                                reward += 25; // Extra bonus for killing a Wizard
+                            }
+                            
+                            // Critical hit bonus
+                            if (unit.criticalChance && Math.random() < unit.criticalChance) {
+                                reward = Math.floor(reward * 1.5); // 50% bonus for critical kills
+                            }
+                            
+                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward;
                             this.units.splice(targetIndex, 1);
                         }
                     }
@@ -625,13 +1227,7 @@ class Game {
                 // Keep units on screen
                 unit.x = Math.max(25, Math.min(1175, unit.x));
             }
-        });
-
-        // === BASE (TOWER) ATTACK LOGIC ===
-        const BASE_ATTACK_RANGE = 120;
-        const BASE_ATTACK_DAMAGE = 10;
-        const BASE_ATTACK_COOLDOWN = 1200; // ms
-
+        });        // === BASE (CASTLE) ATTACK LOGIC ===
         this.players.forEach(player => {
             const base = this.playerBases[player.id];
             if (!base) return;
@@ -643,12 +1239,12 @@ class Game {
 
             // Find enemy units in range
             const now = Date.now();
-            if (now - this.baseAttackCooldowns[player.id] >= BASE_ATTACK_COOLDOWN) {
+            const attackCooldown = base.attackCooldown || 1200;
+            if (now - this.baseAttackCooldowns[player.id] >= attackCooldown) {
                 const enemyUnits = this.units.filter(
                     unit =>
                         unit.playerId !== player.id &&
-                        Math.abs(unit.x - base.x) <= BASE_ATTACK_RANGE &&
-                        // Optional: Only attack units in the same vertical area as the base
+                        Math.abs(unit.x - base.x) <= base.attackRange &&
                         Math.abs(unit.y - 300) < 300 // covers all lanes
                 );
                 if (enemyUnits.length > 0) {
@@ -663,10 +1259,21 @@ class Game {
                         }
                     }
                     
-                    // Create base attack animation
-                    this.createAttackAnimation(base.x, base.y, closest.x, closest.y, 'base');
+                    // Handle different weapon types
+                    if (base.weaponType === 'trebuchet') {
+                        this.processCastleTrebuchetAttack(base, closest, now);
+                    } else if (base.weaponType === 'wizard') {
+                        this.processCastleWizardAttack(base, closest, now);
+                    } else if (base.weaponType === 'arrows') {
+                        // Rapid fire arrows
+                        this.createAttackAnimation(base.x, base.y, closest.x, closest.y, 'castle_arrow');
+                        closest.health = Math.max(0, closest.health - base.damage);
+                    } else {
+                        // Basic castle attack
+                        this.createAttackAnimation(base.x, base.y, closest.x, closest.y, 'castle_basic');
+                        closest.health = Math.max(0, closest.health - base.damage);
+                    }
                     
-                    closest.health = Math.max(0, closest.health - BASE_ATTACK_DAMAGE);
                     this.baseAttackCooldowns[player.id] = now;
 
                     // Remove unit if dead
@@ -760,30 +1367,40 @@ class Game {
 
         // Generate a random offset, but clamp the final y to stay inside the lane
         let y = laneCenterY + (Math.random() - 0.5) * (laneHeight * 0.6);
-        y = Math.max(laneTop + 10, Math.min(laneBottom - 10, y)); // 10px padding from lane edge
-
+        y = Math.max(laneTop + 10, Math.min(laneBottom - 10, y)); // 10px padding from lane edge        // Apply powerup modifiers
+        const modifiers = this.getPowerupModifiers(playerId, unitType);
+        
         const unit = {
             id: `unit_${Date.now()}_${Math.random()}`,
             x: playerIndex === 0 ? 120 : 1080,
             y,
             playerId: playerId,
-            health: stats.health,
-            maxHealth: stats.health,
-            speed: stats.speed,
-            damage: stats.damage,
+            health: Math.floor(stats.health * modifiers.health),
+            maxHealth: Math.floor(stats.health * modifiers.health),
+            speed: stats.speed * modifiers.speed,
+            damage: Math.floor(stats.damage * modifiers.damage),
             moving: true,
             unitType: unitType,
             size: stats.size,
             attackRange: stats.attackRange,
             attackCooldown: stats.attackCooldown,
             lastAttackTime: 0,
-            lane: lane
+            lane: lane,
+            // Store powerup modifiers for combat calculations
+            armorReduction: (stats.armorReduction || 0) + modifiers.armorReduction,
+            criticalChance: (stats.criticalChance || 0) + modifiers.criticalChance,
+            auraRange: (stats.auraRange || 0) * modifiers.auraRange,
+            auraDamageBonus: (stats.auraDamageBonus || 0) + modifiers.auraDamageBonus,
+            immuneToCrits: modifiers.immuneToCrits,
+            healthRegen: modifiers.healthRegen,
+            damageReflection: modifiers.damageReflection,
+            piercing: modifiers.piercing
         };
 
         // Add chain lightning properties for Wizard units
         if (unitType === 'Wizard' && stats.chainLightningRange && stats.chainLightningTargets) {
-            unit.chainLightningRange = stats.chainLightningRange;
-            unit.chainLightningTargets = stats.chainLightningTargets;
+            unit.chainLightningRange = Math.floor(stats.chainLightningRange * modifiers.chainLightningRange);
+            unit.chainLightningTargets = stats.chainLightningTargets + modifiers.chainLightningTargets;
         }
 
         this.units.push(unit);
@@ -811,9 +1428,7 @@ class Game {
         if (this.players.length === 2) {
             this.startGameLoop();
         }
-    }
-
-    getGameState() {
+    }    getGameState() {
         return {
             id: this.id,
             players: this.players,
@@ -828,7 +1443,8 @@ class Game {
             traps: this.traps,
             turrets: this.turrets,
             mines: this.mines,
-            resourceGenerationRate: this.resourceGenerationRate // <-- add this line
+            resourceGenerationRate: this.resourceGenerationRate,
+            playerPowerups: this.playerPowerups
         };
     }
 }
@@ -889,17 +1505,69 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('place-turret', ({ gameId, x, y }) => {
+    socket.on('place-turret', ({ gameId, x, y, turretType }) => {
         const game = games.get(gameId);
-        if (game && game.placeTurret(socket.id, x, y)) {
+        if (game) {
+            const success = game.placeTurret(socket.id, x, y, turretType || 'basic');
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('turret-placed', { success });
+        }
+    });    socket.on('upgrade-turret', ({ gameId, turretId }) => {
+        const game = games.get(gameId);
+        if (game) {
+            const success = game.upgradeTurret(socket.id, turretId);
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('turret-upgraded', { success });
+        }
+    });
+
+    socket.on('upgrade-castle', ({ gameId }) => {
+        const game = games.get(gameId);
+        if (game) {
+            const success = game.upgradeCastle(socket.id);
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('castle-upgraded', { success });
+        }
+    });
+
+    socket.on('change-castle-weapon', ({ gameId, weaponType }) => {
+        const game = games.get(gameId);
+        if (game) {
+            const success = game.changeCastleWeapon(socket.id, weaponType);
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('castle-weapon-changed', { success });
+        }
+    });    socket.on('place-mine', ({ gameId, x, y }) => {
+        const game = games.get(gameId);
+        if (game && game.placeMine(socket.id, x, y)) {
             io.to(gameId).emit('game-updated', game.getGameState());
         }
     });
 
-    socket.on('place-mine', ({ gameId, x, y }) => {
+    socket.on('purchase-powerup', ({ gameId, unitType, powerupName }) => {
         const game = games.get(gameId);
-        if (game && game.placeMine(socket.id, x, y)) {
+        if (game) {
+            const success = game.purchasePowerup(socket.id, unitType, powerupName);
             io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('powerup-purchased', { success, unitType, powerupName });
+        }
+    });
+
+    socket.on('upgrade-trap', ({ gameId, trapId }) => {
+        const game = games.get(gameId);
+        if (game) {
+            const success = game.upgradeTrap(socket.id, trapId);
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('trap-upgraded', { success });
+        }
+    });
+
+    socket.on('upgrade-mine', ({ gameId, mineId }) => {
+        const game = games.get(gameId);
+        if (game) {
+            const success = game.upgradeMine(socket.id, mineId);
+            io.to(gameId).emit('game-updated', game.getGameState());
+            socket.emit('mine-upgraded', { success });
         }
     });
 
