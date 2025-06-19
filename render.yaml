@@ -4,9 +4,8 @@ services:
     runtime: node
     plan: free
     buildCommand: rm -rf node_modules package-lock.json && npm install --no-optional --no-audit --no-fund --legacy-peer-deps && npm run build
-    startCommand: npm start
-    envVars:
+    startCommand: npm start    envVars:
       - key: NODE_ENV
         value: production
       - key: VITE_SERVER_URL
-        value: https://wargame.onrender.com
+        value: https://wargame-3g6g.onrender.com

@@ -192,12 +192,31 @@ function App() {
     
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
   useEffect(() => {
     console.log('Setting up socket connection...');
     
     try {
-      const newSocket = io(`http://${serverIP}`);
+      // Determine if we're in production or development
+      const isProduction = import.meta.env.PROD;
+      let socketUrl: string;
+      
+      if (isProduction) {
+        // In production, use the full URL from environment variable
+        socketUrl = import.meta.env.VITE_SERVER_URL || 'https://wargame.onrender.com';
+      } else {
+        // In development, use HTTP with localhost
+        socketUrl = `http://${serverIP}`;
+      }
+      
+      console.log('Connecting to:', socketUrl);
+      
+      const newSocket = io(socketUrl, {
+        transports: ['websocket', 'polling'], // Allow both transports
+        upgrade: true,
+        rememberUpgrade: true,
+        timeout: 20000,
+        forceNew: true
+      });
       setSocket(newSocket);
 
       newSocket.on('connect', () => {
@@ -316,15 +335,17 @@ function App() {
         newSocket.close();
       };
     } catch (err) {
-      console.error('Error setting up socket:', err);
-      setError(`Setup error: ${err}`);
+      console.error('Error setting up socket:', err);      setError(`Setup error: ${err}`);
     }
   }, [serverIP]);  // Update server IP dynamically based on user input or environment
+  
   useEffect(() => {
     // Use environment variable for production, fallback to localhost for development
     const serverUrl = import.meta.env.VITE_SERVER_URL || 'localhost:3001';
     setServerIP(serverUrl);
-  }, []);// Canvas rendering - optimized for better performance
+  }, []);
+  
+  // Canvas rendering - optimized for better performance
   useEffect(() => {
     if (!gameState || !canvasRef.current) return;
 
