@@ -903,6 +903,43 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('roulette-bet', ({ gameId, playerId, betAmount }) => {
+        const game = games.get(gameId);
+        if (game && game.playerResources[playerId] >= betAmount) {
+            game.playerResources[playerId] -= betAmount;
+            io.to(gameId).emit('game-updated', game.getGameState());
+            console.log(`Player ${playerId} placed bet of ${betAmount} coins`);
+        }
+    });
+
+    socket.on('roulette-win', ({ gameId, playerId, winnings }) => {
+        const game = games.get(gameId);
+        if (game) {
+            game.playerResources[playerId] = (game.playerResources[playerId] || 0) + winnings;
+            io.to(gameId).emit('game-updated', game.getGameState());
+            console.log(`Player ${playerId} won ${winnings} coins from roulette`);
+        }
+    });
+
+    socket.on('plinko-reward', ({ gameId, playerId, multiplier, amount }) => {
+        const game = games.get(gameId);
+        if (game && playerId) {
+            if (multiplier < 0) {
+                // This is a cost for dropping a ball (deduct the amount)
+                game.playerResources[playerId] -= amount;
+                console.log(`Player ${playerId} spent ${amount} coins on a Plinko ball`);
+            } else {
+                // This is a reward for landing in a slot
+                const winnings = Math.round(multiplier * amount);
+                game.playerResources[playerId] += winnings;
+                console.log(`Player ${playerId} won ${winnings} coins from Plinko (${multiplier}x multiplier)`);
+            }
+            
+            // Update the game state
+            io.to(gameId).emit('game-updated', game.getGameState());
+        }
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
 

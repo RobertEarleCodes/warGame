@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { io, Socket } from 'socket.io-client'
 import './App.css'
+import RouletteWheel from './RouletteWheel'
+import PlinkoBoard from './PlinkoBoard'
 
 interface Player {
   id: string;
@@ -92,16 +94,78 @@ interface GameState {
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
-  const [gameId, setGameId] = useState('');
-  const [playerName, setPlayerName] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<string>('disconnected');
+  const [error, setError] = useState<string>('');
+  const [gameId, setGameId] = useState<string>('');
+  const [playerName, setPlayerName] = useState<string>('');
+  const [serverIP, setServerIP] = useState<string>('localhost:3001');
+  const [customServerEnabled, setCustomServerEnabled] = useState<boolean>(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerIndex, setPlayerIndex] = useState<number>(-1);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const [error, setError] = useState<string>('');
+  const [plinkoReward, setPlinkoReward] = useState(0);
   const [placementMode, setPlacementMode] = useState<'trap' | 'turret' | 'mine'>('trap');
   const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info'>('units');
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 600 });
+  const [isMinimized, setIsMinimized] = useState(false); // Keep as false by default
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Listen for maximize message from PlinkoBoard
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.action === 'maximizePlinko') {
+        setIsMinimized(false);
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  // Create floating particles effect
+  useEffect(() => {
+    const createParticles = () => {
+      const particles = [];
+      for (let i = 0; i < 20; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = Math.random() * 100 + 'vw';
+        particle.style.animationDelay = Math.random() * 8 + 's';
+        particle.style.animationDuration = (6 + Math.random() * 4) + 's';
+        document.body.appendChild(particle);
+        particles.push(particle);
+        
+        setTimeout(() => {
+          if (particle.parentNode) {
+            particle.parentNode.removeChild(particle);
+          }
+        }, 10000);
+      }
+    };
+
+    createParticles();
+    const interval = setInterval(createParticles, 3000);
+
+    return () => {
+      clearInterval(interval);
+      // Clean up any remaining particles
+      document.querySelectorAll('.particle').forEach(p => {
+        if (p.parentNode) p.parentNode.removeChild(p);
+      });
+    };
+  }, []);
+
+  // Listen for maximize message from PlinkoBoard
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.action === 'maximizePlinko') {
+        // Set game to maximized state
+        setIsMinimized(false);
+      }
+    };
+    
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   // Handle window resize for responsive canvas
   useEffect(() => {
@@ -124,7 +188,7 @@ function App() {
     console.log('Setting up socket connection...');
     
     try {
-      const newSocket = io('http://192.168.4.85:3001');
+      const newSocket = io(`http://${serverIP}`);
       setSocket(newSocket);
 
       newSocket.on('connect', () => {
@@ -175,6 +239,13 @@ function App() {
       console.error('Error setting up socket:', err);
       setError(`Setup error: ${err}`);
     }
+  }, [serverIP]);
+
+  // Update server IP dynamically based on user input or environment
+  useEffect(() => {
+    const ip = '192.168.4.85'; // Replace with your local IP address
+    const port = '3001'; // Replace with your server port
+    setServerIP(`${ip}:${port}`);
   }, []);
 
   // Canvas rendering - only re-render when gameState or canvas size changes
@@ -199,19 +270,52 @@ function App() {
       // Clear canvas (using standard dimensions since we're scaled)
       ctx.clearRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
       
-      // Draw battlefield background
-      ctx.fillStyle = '#2d4a22';
+      // Draw battlefield background with enhanced effects
+      const gradient = ctx.createLinearGradient(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
+      gradient.addColorStop(0, '#0a0a1a');
+      gradient.addColorStop(0.3, '#1a0a2e');
+      gradient.addColorStop(0.7, '#2d1b69');
+      gradient.addColorStop(1, '#0a0a1a');
+      ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
       
-      // Draw center line
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([10, 10]);
+      // Add energy grid pattern
+      ctx.strokeStyle = 'rgba(131, 56, 236, 0.2)';
+      ctx.lineWidth = 1;
+      const gridSize = 50;
+      for (let x = 0; x <= STANDARD_WIDTH; x += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, STANDARD_HEIGHT);
+        ctx.stroke();
+      }
+      for (let y = 0; y <= STANDARD_HEIGHT; y += gridSize) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(STANDARD_WIDTH, y);
+        ctx.stroke();
+      }
+      
+      // Draw enhanced center line with glow effect
+      const centerGradient = ctx.createLinearGradient(STANDARD_WIDTH / 2 - 10, 0, STANDARD_WIDTH / 2 + 10, 0);
+      centerGradient.addColorStop(0, 'rgba(255, 0, 110, 0)');
+      centerGradient.addColorStop(0.5, 'rgba(255, 0, 110, 0.8)');
+      centerGradient.addColorStop(1, 'rgba(255, 0, 110, 0)');
+      
+      ctx.fillStyle = centerGradient;
+      ctx.fillRect(STANDARD_WIDTH / 2 - 10, 0, 20, STANDARD_HEIGHT);
+      
+      ctx.strokeStyle = '#ff006e';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#ff006e';
+      ctx.shadowBlur = 15;
+      ctx.setLineDash([15, 10]);
       ctx.beginPath();
       ctx.moveTo(STANDARD_WIDTH / 2, 0);
       ctx.lineTo(STANDARD_WIDTH / 2, STANDARD_HEIGHT);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.shadowBlur = 0;
 
       // Draw bases
       if (gameState.playerBases) {
@@ -1318,8 +1422,6 @@ function App() {
                   const ringRadius = (10 + ring * 8) * (1 + impactIntensity * 0.5);
                   const ringAlpha = (0.6 - ring * 0.2) * impactIntensity;
                   
-                  ctx.strokeStyle = `rgba(0, 255, 255, ${ringAlpha})`;
-                  ctx.lineWidth = 3 - ring;
                   ctx.shadowColor = '#00FFFF';
                   ctx.shadowBlur = 20;
                   
@@ -1592,8 +1694,40 @@ function App() {
     error 
   });
   
+  // Toggle game minimize/maximize state
+  const toggleGameMinimized = () => {
+    setIsMinimized(prev => !prev);
+  };
+  
   return (
-    <div className="app">
+    <div className={`app ${isMinimized ? 'game-minimized' : 'game-maximized'}`}>
+      {/* Plinko Board as interactive background */}
+      <PlinkoBoard 
+        playerResources={gameState ? getMyResources() : 0}
+        onReward={(multiplier, amount) => {
+          if (gameState && playerIndex >= 0) {
+            // Handle both costs and winnings
+            socket?.emit('plinko-reward', {
+              gameId,
+              playerId: gameState.players[playerIndex].id,
+              multiplier,
+              amount
+            });
+          }
+        }}
+      />
+      
+      {/* Minimize/Maximize Button - only show when in game */}
+      {gameState && (
+        <button 
+          className="minimize-button" 
+          onClick={toggleGameMinimized}
+          title={isMinimized ? "Maximize Game" : "Minimize Game"}
+        >
+          {isMinimized ? '⬆️' : '⬇️'}
+        </button>
+      )}
+      {/* Main game UI overlayed above Plinko */}
       {!gameState ? (
         <div className="join-screen">
           <div className="join-header">
@@ -1632,7 +1766,7 @@ function App() {
       ) : (
         <div className="game-container">
           <div className="side-panel">
-            <div className="game-header-compact">
+            <div className="game-header-compact hologram-effect">
               <div className="game-title">⚔️ Battle Arena</div>
             </div>
             <div className="game-info-compact">
@@ -1656,8 +1790,7 @@ function App() {
                   <div className="stat-compact">📍 Lane {getMySelectedLane()+1}</div>
                 </div>
               )}
-            </div>
-            
+            </div>            
             {gameState.players.length === 2 && !gameState.gameOver && (
               <div className="control-panel-compact">
                 <div className="tab-navigation-compact">
@@ -1843,12 +1976,35 @@ function App() {
               ref={canvasRef} 
               width={canvasSize.width} 
               height={canvasSize.height} 
-              className="battlefield-compact"
+              className="battlefield-compact hologram-effect"
               onClick={handleCanvasClick}
               style={{ cursor: activeTab === 'defense' ? 'crosshair' : 'default' }}
             />
           </div>
         </div>
+      )}
+      
+      {/* Roulette Wheel - always visible when in game */}
+      {gameState && (
+        <RouletteWheel 
+          playerResources={getMyResources()}
+          onSpin={(result, winnings) => {
+            if (winnings > 0) {
+              socket?.emit('roulette-win', { 
+                gameId, 
+                playerId: gameState.players[playerIndex].id, 
+                winnings 
+              });
+            }
+          }}
+          onBet={(betAmount, betType, betValue) => {
+            socket?.emit('roulette-bet', { 
+              gameId, 
+              playerId: gameState.players[playerIndex].id, 
+              betAmount 
+            });
+          }}
+        />
       )}
     </div>
   );
