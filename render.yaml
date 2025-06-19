@@ -8,4 +8,4 @@ services:
       - key: NODE_ENV
         value: production
       - key: VITE_SERVER_URL
-        value: https://wargame-3g6g.onrender.com
+        value: https://wargame-dywk.onrender.com
