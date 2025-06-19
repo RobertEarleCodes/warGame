@@ -3,8 +3,10 @@ services:
     name: wargame
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
+    buildCommand: rm -rf node_modules package-lock.json && npm install --no-optional && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
+      - key: VITE_SERVER_URL
+        value: https://wargame.onrender.com

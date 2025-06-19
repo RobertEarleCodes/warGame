@@ -7,9 +7,10 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // This allows external connections
     port: 5173
-  },
-  build: {
+  },  build: {
+    target: 'esnext',
     rollupOptions: {
+      external: [],
       output: {
         // Add timestamps to filenames to prevent caching
         entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
