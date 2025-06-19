@@ -208,14 +208,12 @@ class Game {    constructor(id) {
 
         this.traps.push(trap);
         return true;
-    }
-
-    placeTurret(playerId, x, y) {
+    }    placeTurret(playerId, x, y) {
         const player = this.players.find(p => p.id === playerId);
         if (!player) return false;
 
         const playerIndex = this.players.findIndex(p => p.id === playerId);
-        const TURRET_COST = 125; // Cost to place a turret
+        const TURRET_COST = 200; // Increased cost to place a turret (was 125)
         
         // Check if player has enough resources
         if (this.playerResources[playerId] < TURRET_COST) return false;
@@ -889,7 +887,51 @@ class Game {    constructor(id) {
         if (this.players.length === 2) {
             this.startGameLoop();
         }
-    }    getGameState() {
+    }    resetForRematch() {
+        // Stop current game loop
+        this.stopGameLoop();
+        
+        // Reset game state
+        this.units = [];
+        this.gameOver = false;
+        this.winner = null;
+        this.currentPlayer = 0;
+        this.attackAnimations = [];
+        this.traps = [];
+        this.turrets = [];
+        this.mines = [];
+        this.turretAttackCooldowns = {};
+        this.baseAttackCooldowns = {};
+        
+        // Reset player resources and bases
+        this.players.forEach(player => {
+            this.playerResources[player.id] = 500; // Starting resources
+            this.playerBases[player.id] = {
+                health: 1000,
+                maxHealth: 1000,
+                x: this.playerBases[player.id].x, // Keep original position
+                y: 300,
+                level: 1,
+                weaponType: 'basic',
+                damage: 10,
+                attackRange: 120
+            };
+            this.playerSelectedLane[player.id] = 0;
+        });
+        
+        // Reset resource generation
+        this.resourceGenerationRate = 10;
+        this.lastResourceUpdate = Date.now();
+        this.lastResourceIncrease = Date.now();
+        
+        // Reset powerups
+        this.playerPowerups = {};
+        
+        // Start new game loop
+        this.startGameLoop();
+    }
+
+    getGameState() {
         return {
             id: this.id,
             players: this.players,
@@ -1256,9 +1298,7 @@ io.on('connection', (socket) => {
                 const reason = isAlreadyPurchased ? 'Already purchased' : 'Not enough resources';
                 socket.emit('powerup-purchased', { success: false, message: reason });
             }
-        }    });
-
-    socket.on('gamble', ({ gameId }) => {
+        }    });    socket.on('gamble', ({ gameId }) => {
         const game = games.get(gameId);
         const player = game?.players.find(p => p.id === socket.id);
         
@@ -1266,17 +1306,55 @@ io.on('connection', (socket) => {
             const result = game.gamble(player.id);
             socket.emit('gamble-result', result);
             
-            if (result.success) {
-                io.to(gameId).emit('game-updated', game.getGameState());
-                
-                // If they won, emit special celebration
-                if (result.won) {
-                    io.to(gameId).emit('gamble-victory', { 
-                        winner: player.name,
-                        message: result.message 
-                    });
-                }
+            // Send updated game state
+            io.to(gameId).emit('game-update', game.getGameState());
+            
+            // If they won, emit special celebration
+            if (result.won) {
+                io.to(gameId).emit('gamble-victory', { 
+                    winner: player.name,
+                    message: result.message 
+                });
             }
+        }
+    });
+
+    socket.on('request-rematch', ({ gameId }) => {
+        const game = games.get(gameId);
+        if (!game) return;
+
+        const playerId = socket.id;
+        const player = game.players.find(p => p.id === playerId);
+        if (!player) return;
+
+        // Initialize rematch requests if not exists
+        if (!game.rematchRequests) {
+            game.rematchRequests = new Set();
+        }
+
+        // Add this player's rematch request
+        game.rematchRequests.add(playerId);
+
+        // Notify all players about the rematch request
+        const requesterName = player.name;
+        io.to(gameId).emit('rematch-requested', { 
+            requester: requesterName,
+            playerId: playerId 
+        });
+
+        // Check if both players have requested rematch
+        if (game.rematchRequests.size === 2) {
+            // Reset the game state for rematch
+            game.resetForRematch();
+            
+            // Clear rematch requests
+            game.rematchRequests.clear();
+            
+            // Notify players that rematch is starting
+            io.to(gameId).emit('rematch-started');
+            
+            // Send updated game state
+            io.to(gameId).emit('game-update', game.getGameState());
         }
     });
 
@@ -1285,13 +1363,13 @@ io.on('connection', (socket) => {
 
         // Clean up games when players disconnect
         games.forEach((game, gameId) => {
-            const playerIndex = game.players.findIndex(p => p.id === socket.id);            if (playerIndex !== -1) {
+            const playerIndex = game.players.findIndex(p => p.id === socket.id);
+            if (playerIndex !== -1) {
                 game.stopGameLoop();
                 game.players.splice(playerIndex, 1);
                 if (game.players.length === 0) {
                     games.delete(gameId);
-                } else {
-                    io.to(gameId).emit('player-disconnected', { disconnectedPlayer: playerIndex });
+                } else {                    io.to(gameId).emit('player-disconnected', { disconnectedPlayer: playerIndex });
                 }
             }
         });

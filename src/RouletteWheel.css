@@ -322,6 +322,8 @@
 .color-buttons,
 .oddeven-buttons {
   display: flex;
+}
+
 /* Betting Interface - Updated for Window */
 .roulette-controls {
   margin-top: 15px;
@@ -444,6 +446,31 @@
   font-weight: bold;
   font-size: 12px;
   text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+/* Selected button styles */
+.color-bet-btn.selected,
+.oddeven-bet-btn.selected {
+  background: linear-gradient(135deg, #ffd700, #ffed4e) !important;
+  color: #1a1a2e !important;
+  border-color: #ffd700 !important;
+  box-shadow: 
+    0 0 15px rgba(255, 215, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  transform: scale(1.05);
+  font-weight: bold;
+}
+
+.color-bet-btn.red.selected {
+  background: linear-gradient(135deg, #ff6b6b, #ff5252) !important;
+  color: white !important;
+  border-color: #ff6b6b !important;
+}
+
+.color-bet-btn.black.selected {
+  background: linear-gradient(135deg, #333, #555) !important;
+  color: white !important;
+  border-color: #666 !important;
 }
 
 /* Responsive adjustments */

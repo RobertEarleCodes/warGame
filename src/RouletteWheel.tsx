@@ -64,7 +64,6 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
       };
     }
   }, [isDragging, dragOffset]);
-
   // Generate the conic gradient based on actual number sequence
   const generateWheelGradient = () => {
     const sectionAngle = 360 / numbers.length;
@@ -76,10 +75,11 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
       const color = getNumberColor(numbers[i]);
       const cssColor = color === 'red' ? '#dc143c' : color === 'black' ? '#2c2c2c' : '#228b22';
       
+      // Make sure the gradient sections align with the visual sections
       gradientStops.push(`${cssColor} ${startAngle}deg ${endAngle}deg`);
     }
     
-    return `conic-gradient(${gradientStops.join(', ')})`;
+    return `conic-gradient(from 0deg, ${gradientStops.join(', ')})`;
   };
 
   // Handle window resize
@@ -127,9 +127,7 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
     }
     
     return winnings;
-  };
-
-  const spinWheel = () => {
+  };  const spinWheel = () => {
     if (isSpinning || betAmount > playerResources || betAmount <= 0) return;
     
     setIsSpinning(true);
@@ -143,26 +141,37 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
     const minSpins = 3;
     const maxSpins = 6;
     const spins = Math.random() * (maxSpins - minSpins) + minSpins;
-    const finalAngle = Math.random() * 360;
-    const totalRotation = spins * 360 + finalAngle;
     
-    // Calculate which number the wheel lands on
-    // Each section is 360/37 = 9.73 degrees
+    // COMPLETELY NEW APPROACH:
+    // Let's work backwards from what we want to happen
+    // 1. Pick a random number first
+    const randomIndex = Math.floor(Math.random() * numbers.length);
+    const targetNumber = numbers[randomIndex];
+    
+    // 2. Calculate what angle the wheel needs to stop at for that number to be under the pointer
     const sectionAngle = 360 / numbers.length;
-    const normalizedAngle = (360 - (finalAngle % 360)) % 360;
-    const sectionIndex = Math.floor(normalizedAngle / sectionAngle);
-    const landedNumber = numbers[sectionIndex];
+    
+    // The number at index 0 starts at 0 degrees, index 1 at sectionAngle degrees, etc.
+    // We want the center of the target section to be at the top (under the pointer)
+    const targetAngle = randomIndex * sectionAngle + (sectionAngle / 2);
+    
+    // 3. Calculate the rotation needed to get there
+    // If we want targetAngle to end up at 0 degrees (top), we need to rotate by (360 - targetAngle)
+    const adjustedFinalAngle = (360 - targetAngle) % 360;
+    const adjustedTotalRotation = spins * 360 + adjustedFinalAngle;
+    
+    console.log(`Target: ${targetNumber} (${getNumberColor(targetNumber)}), Index: ${randomIndex}, TargetAngle: ${targetAngle}, FinalRotation: ${adjustedTotalRotation}`);
     
     if (wheelRef.current) {
-      wheelRef.current.style.transform = `rotate(${totalRotation}deg)`;
+      wheelRef.current.style.transform = `rotate(${adjustedTotalRotation}deg)`;
     }
     
     setTimeout(() => {
-      const winnings = calculateWinnings(landedNumber);
+      const winnings = calculateWinnings(targetNumber);
       setIsSpinning(false);
-      setResult(landedNumber);
+      setResult(targetNumber);
       setLastWinnings(winnings);
-      onSpin?.(landedNumber, winnings);
+      onSpin?.(targetNumber, winnings);
     }, 3000);
   };
 
@@ -200,21 +209,28 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
               style={{
                 background: generateWheelGradient()
               }}
-            >
-              {numbers.map((number, index) => {
+            >              {numbers.map((number, index) => {
+                // Position each number at the start of its section
+                // Section i goes from (i * sectionAngle) to ((i+1) * sectionAngle)
                 const angle = (index * 360) / numbers.length;
+                const centerOffset = (360 / numbers.length) / 2; // Center the number in the section
                 return (
                   <div
                     key={`${number}-${index}`}
                     className="roulette-number-container"
                     style={{
-                      transform: `rotate(${angle + 360/numbers.length/2}deg)`,
+                      // Position the number at the center of its section
+                      transform: `rotate(${angle + centerOffset}deg)`,
                     }}
                   >
                     <div 
                       className="roulette-number"
                       style={{
-                        transform: `rotate(${-(angle + 360/numbers.length/2)}deg)`,
+                        // Keep the number upright
+                        transform: `rotate(${-(angle + centerOffset)}deg)`,
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        fontSize: '12px'
                       }}
                     >
                       {number}
@@ -277,10 +293,8 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
                   <option value="oddeven">Odd/Even</option>
                   <option value="number">Number</option>
                 </select>
-              </div>
-
-              <div className="bet-value-section">
-                <label>Bet On:</label>
+              </div>              <div className="bet-value-section">
+                <label>Current Bet: <strong>{betType === 'color' ? betValue.toUpperCase() : betType === 'oddeven' ? betValue.toUpperCase() : `Number ${betValue}`}</strong></label>
                 {betType === 'color' && (
                   <div className="color-buttons">
                     <button 
@@ -288,14 +302,14 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
                       onClick={() => setBetValue('red')}
                       disabled={isSpinning}
                     >
-                      Red (2:1)
+                      🔴 Red (2:1)
                     </button>
                     <button 
                       className={`color-bet-btn black ${betValue === 'black' ? 'selected' : ''}`}
                       onClick={() => setBetValue('black')}
                       disabled={isSpinning}
                     >
-                      Black (2:1)
+                      ⚫ Black (2:1)
                     </button>
                   </div>
                 )}
@@ -307,14 +321,14 @@ const RouletteWheel: React.FC<RouletteWheelProps> = ({ onSpin, playerResources, 
                       onClick={() => setBetValue('odd')}
                       disabled={isSpinning}
                     >
-                      Odd (2:1)
+                      🔢 Odd (2:1)
                     </button>
                     <button 
                       className={`oddeven-bet-btn ${betValue === 'even' ? 'selected' : ''}`}
                       onClick={() => setBetValue('even')}
                       disabled={isSpinning}
                     >
-                      Even (2:1)
+                      🔢 Even (2:1)
                     </button>
                   </div>
                 )}

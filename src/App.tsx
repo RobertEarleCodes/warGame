@@ -136,18 +136,14 @@ function App() {
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 600 });
   const [isMinimized, setIsMinimized] = useState(false); // Keep as false by default
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
-  // Listen for maximize message from PlinkoBoard
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data && event.data.action === 'maximizePlinko') {
-        setIsMinimized(false);
-      }
-    };
-    
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+    // Money spending animation state
+  const [moneyAnimations, setMoneyAnimations] = useState<Array<{
+    id: string;
+    amount: number;
+    x: number;
+    y: number;
+    opacity: number;
+  }>>([]);
 
   // Create floating particles effect
   useEffect(() => {
@@ -180,22 +176,7 @@ function App() {
         if (p.parentNode) p.parentNode.removeChild(p);
       });
     };
-  }, []);
-
-  // Listen for maximize message from PlinkoBoard
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data.action === 'maximizePlinko') {
-        // Set game to maximized state
-        setIsMinimized(false);
-      }
-    };
-    
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  // Handle window resize for responsive canvas
+  }, []);  // Handle window resize for responsive canvas
   useEffect(() => {
     const handleResize = () => {
       const maxWidth = window.innerWidth - 320; // Account for side panel
@@ -316,6 +297,18 @@ function App() {
 
       newSocket.on('gamble-victory', (data) => {
         alert(`🏆 GAME OVER! ${data.winner} won the entire game by gambling! ${data.message}`);
+      });
+
+      newSocket.on('rematch-requested', (data) => {
+        // Show notification about rematch request
+        if (data.playerId !== gameState?.players[playerIndex]?.id) {
+          alert(`${data.requester} has requested a rematch! You can also request one by clicking the Rematch button.`);
+        }
+      });
+
+      newSocket.on('rematch-started', () => {
+        alert('🎉 Rematch starting! Good luck!');
+        // Game state will be updated via game-update event
       });
 
       return () => {
@@ -1613,7 +1606,7 @@ function App() {
               for (let stroke = 0; stroke < 6; stroke++) {
                 ctx.save();
                 
-                const strokeIntensity = Math.sin(adjustedTime * 0.04 + stroke) * 0.3 + 0.7;
+                const strokeIntensity = Math.sin(adjustedTime * 0.04 + stroke) * 0.3 +  0.7;
                 
                 if (stroke === 0) {
                   // Core white lightning
@@ -1621,7 +1614,7 @@ function App() {
                   ctx.lineWidth = 8;
                   ctx.shadowColor = '#FFFFFF';
                   ctx.shadowBlur = 30;
-                  ctx.globalAlpha = strokeIntensity;
+                                   ctx.globalAlpha = strokeIntensity;
                 } else if (stroke === 1) {
                   // Bright cyan layer
                   ctx.strokeStyle = '#00FFFF';
@@ -1722,7 +1715,7 @@ function App() {
               }
               
               // Lightning impact flash
-              const flashIntensity = Math.max(0, Math.sin(adjustedTime * 0.12) * 0.4);
+              const flashIntensity = Math.max(0, Math.sin(adjustedTime * 0.1) * 0.3);
               if (flashIntensity > 0) {
                 const flashGradient = ctx.createRadialGradient(anim.toX, anim.toY, 0, anim.toX, anim.toY, 50);
                 flashGradient.addColorStop(0, `rgba(255, 255, 255, ${flashIntensity})`);
@@ -2488,13 +2481,15 @@ function App() {
         Archer: 350, 
         King: 500, 
         Wizard: 400 // Cost for Wizard
-      };
-      if (myResources >= (unitCosts[unitType] || 0)) {
+      };      if (myResources >= (unitCosts[unitType] || 0)) {
+        const cost = unitCosts[unitType] || 0;
         socket.emit('spawn-unit', { 
           gameId, 
           unitType, 
           lane: getMySelectedLane() // Send selected lane
         });
+        // Trigger money animation
+        triggerMoneyAnimation(cost);
       }
     }
   };
@@ -2502,9 +2497,9 @@ function App() {
   const placeTrap = (x: number, y: number) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = gameState.playerResources[gameState.players[playerIndex].id] || 0;
-      const TRAP_COST = 50;
-      if (myResources >= TRAP_COST) {
+      const TRAP_COST = 50;      if (myResources >= TRAP_COST) {
         socket.emit('place-trap', { gameId, x, y });
+        triggerMoneyAnimation(TRAP_COST, x, y);
       }
     }
   };
@@ -2512,9 +2507,9 @@ function App() {
   const placeTurret = (x: number, y: number) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = gameState.playerResources[gameState.players[playerIndex].id] || 0;
-      const TURRET_COST = 125;
-      if (myResources >= TURRET_COST) {
+      const TURRET_COST = 125;      if (myResources >= TURRET_COST) {
         socket.emit('place-turret', { gameId, x, y });
+        triggerMoneyAnimation(TURRET_COST, x, y);
       }
     }
   };
@@ -2522,9 +2517,9 @@ function App() {
   const placeMine = (x: number, y: number) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = gameState.playerResources[gameState.players[playerIndex].id] || 0;
-      const MINE_COST = 75;
-      if (myResources >= MINE_COST) {
+      const MINE_COST = 75;      if (myResources >= MINE_COST) {
         socket.emit('place-mine', { gameId, x, y });
+        triggerMoneyAnimation(MINE_COST, x, y);
       }
     }
   };
@@ -2657,12 +2652,12 @@ function App() {
     const playerPowerups = gameState.playerPowerups?.[playerId];
     return playerPowerups && playerPowerups[unitType] && playerPowerups[unitType][powerupName] || false;
   };
-
   const handleGamble = () => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = getMyResources();
       if (myResources >= 1000) {
         socket.emit('gamble', { gameId });
+        triggerMoneyAnimation(1000);
       }
     }
   };
@@ -2680,9 +2675,38 @@ function App() {
     setIsMinimized(prev => !prev);
   };
   
+  // Function to show money spending animation  // Function to trigger money spending animation
+  const triggerMoneyAnimation = (amount: number, x?: number, y?: number) => {
+    const animationId = `money_${Date.now()}_${Math.random()}`;
+    const newAnimation = {
+      id: animationId,
+      amount: amount,
+      x: x || window.innerWidth * 0.15, // Default near resources display
+      y: y || 100,
+      opacity: 1
+    };
+    
+    setMoneyAnimations(prev => [...prev, newAnimation]);
+    
+    // Animate and remove after delay
+    setTimeout(() => {
+      setMoneyAnimations(prev => 
+        prev.map(anim => 
+          anim.id === animationId 
+            ? { ...anim, opacity: 0, y: anim.y - 50 }
+            : anim
+        )
+      );
+      
+      // Remove completely after fade
+      setTimeout(() => {
+        setMoneyAnimations(prev => prev.filter(anim => anim.id !== animationId));
+      }, 500);
+    }, 100);
+  };
   return (
-    <div className={`app ${isMinimized ? 'game-minimized' : 'game-maximized'}`}>
-      {/* Plinko Board as interactive background */}
+    <div className="app">
+      {/* Plinko Board as interactive background - always visible */}
       <PlinkoBoard 
         playerResources={gameState ? getMyResources() :  0}
         onReward={(multiplier, amount) => {
@@ -2695,30 +2719,58 @@ function App() {
               amount
             });
           }
-        }}
-      />
-        {/* Minimize/Maximize Button - only show when in game */}
+        }}      />
+
+      {/* Roulette Wheel - always visible when in game, outside of sliding UI */}
       {gameState && (
-        <button 
-          className="minimize-button" 
-          onClick={toggleGameMinimized}
-          title={isMinimized ? "Maximize Game" : "Minimize Game"}
-        >
-          {isMinimized ? '⬆️' : '⬇️'}
-        </button>
+        <RouletteWheel 
+          playerResources={getMyResources()}
+          onSpin={(_, winnings) => {
+            if (winnings > 0) {
+              socket?.emit('roulette-win', { 
+                gameId, 
+                playerId: gameState.players[playerIndex].id, 
+                winnings 
+              });
+            }
+          }}
+          onBet={(betAmount, _, __) => {
+            socket?.emit('roulette-bet', { 
+              gameId, 
+              playerId: gameState.players[playerIndex].id, 
+              betAmount 
+            });
+            triggerMoneyAnimation(betAmount);
+          }}
+        />
       )}
-      
-      {/* Gamble Button - only show when in game and not game over */}
-      {gameState && !gameState.gameOver && (
-        <button 
-          className="gamble-button" 
-          onClick={handleGamble}
-          disabled={getMyResources() < 1000}
-          title="Gamble 1000 coins for a 1/10000 chance to win the game!"
-        >
-          🎰 Gamble (1000)
-        </button>
-      )}
+
+      {/* Main UI container that can slide down */}
+      <div className={`main-ui-container ${isMinimized ? 'minimized' : 'maximized'}`}>
+        {/* Minimize/Maximize Button - only show when in game */}
+        {gameState && (
+          <button 
+            className="minimize-button" 
+            onClick={toggleGameMinimized}
+            title={isMinimized ? "Maximize Game" : "Minimize Game"}
+          >
+            {isMinimized ? '⬆️' : '⬇️'}
+          </button>
+        )}
+        
+        {/* Gamble Button - only show when in game and not game over */}
+        {gameState && !gameState.gameOver && (
+          <button 
+            className={`gamble-button ${getMyResources() < 1000 ? 'disabled' : ''}`}
+            onClick={handleGamble}
+            disabled={getMyResources() < 1000}
+            title="Gamble 1000 coins for a 1/10000 chance to win the game!"
+          >
+            <div className="gamble-text">🎰 GAMBLE</div>
+            <div className="gamble-details">1000 coins • 1/10,000 chance</div>
+            <div className="gamble-subtitle">Instant Victory!</div>
+          </button>
+        )}
       {/* Main game UI overlayed above Plinko */}
       {!gameState ? (
         <div className="join-screen">
@@ -3261,13 +3313,58 @@ function App() {
                   )}
                 </div>
               </div>
-            )}
-
-            {gameState.gameOver && (
-              <div className="game-over-compact">
-                <button className="reset-btn-compact" onClick={() => socket?.emit('reset-game', { gameId })}>
-                  🔄 New Battle
-                </button>
+            )}            {gameState.gameOver && (
+              <div className="game-over-screen">
+                <div className="game-over-modal">
+                  <div className="game-over-header">
+                    {gameState.winner?.id === gameState.players[playerIndex]?.id ? (
+                      <div className="victory-content">
+                        <h1>🏆 VICTORY!</h1>
+                        <p>Congratulations! You have conquered the battlefield!</p>
+                      </div>
+                    ) : (
+                      <div className="defeat-content">
+                        <h1>💀 DEFEAT</h1>
+                        <p>Your castle has fallen. Better luck next time!</p>
+                      </div>
+                    )}                    {gameState.winner && (
+                      <div className="winner-info">
+                        Winner: <span className="winner-name">{gameState.winner.name}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <div className="game-over-actions">
+                    <button 
+                      className="rematch-btn" 
+                      onClick={() => {
+                        if (confirm('Request a rematch? Both players must agree.')) {
+                          socket?.emit('request-rematch', { gameId });
+                        }
+                      }}
+                    >
+                      ⚔️ Request Rematch
+                    </button>
+                    
+                    <button 
+                      className="main-menu-btn" 
+                      onClick={() => {
+                        if (confirm('Return to main menu? This will leave the current game.')) {
+                          window.location.reload();
+                        }
+                      }}
+                    >
+                      🏠 Main Menu
+                    </button>
+                    
+                    <button 
+                      className="reset-btn-compact" 
+                      onClick={() => socket?.emit('reset-game', { gameId })}
+                    >
+                      🔄 Quick Reset
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -3281,32 +3378,32 @@ function App() {
               onClick={handleCanvasClick}
               style={{ cursor: activeTab === 'defense' ? 'crosshair' : 'default' }}
             />
-          </div>
+          </div>        </div>
+      )}
+
+      {/* Money spending animations */}
+      {moneyAnimations.map(animation => (
+        <div
+          key={animation.id}
+          className="money-animation"
+          style={{
+            position: 'fixed',
+            left: animation.x,
+            top: animation.y,
+            opacity: animation.opacity,
+            color: '#ff4444',
+            fontSize: '18px',
+            fontWeight: 'bold',
+            pointerEvents: 'none',
+            zIndex: 9999,
+            textShadow: '0 0 4px rgba(255, 68, 68, 0.8)',
+            transition: 'all 0.5s ease-out'
+          }}
+        >
+          -${animation.amount}
         </div>
-      )}
-      
-      {/* Roulette Wheel - always visible when in game */}
-      {gameState && (
-        <RouletteWheel 
-          playerResources={getMyResources()}
-          onSpin={(_, winnings) => {
-            if (winnings > 0) {
-              socket?.emit('roulette-win', { 
-                gameId, 
-                playerId: gameState.players[playerIndex].id, 
-                winnings 
-              });
-            }
-          }}
-          onBet={(betAmount, _, __) => {
-            socket?.emit('roulette-bet', { 
-              gameId, 
-              playerId: gameState.players[playerIndex].id, 
-              betAmount 
-            });
-          }}
-        />
-      )}
+      ))}
+      </div> {/* Close main-ui-container */}
     </div>
   );
 }

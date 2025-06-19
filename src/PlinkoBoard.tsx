@@ -553,9 +553,7 @@ const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ onReward, playerResources }) 
     
     // Reset dropping state after a short delay
     setTimeout(() => setIsDropping(false), 500);
-  }, [isDropping, playerResources, dropCost]);
-
-  // Handle canvas click
+  }, [isDropping, playerResources, dropCost]);  // Handle canvas click
   const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | HTMLDivElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -673,16 +671,20 @@ const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ onReward, playerResources }) 
             <>
               <div className="drop-cost" onClick={() => setShowCostInput(true)}>
                 Ball Price: <span className="cost-value">{dropCost}</span> coins (click to change)
-              </div>
-              <div className="bet-presets">
+              </div>              <div className="bet-presets">
                 {[5, 10, 25, 50, 100].map((amount) => (
                   <button
                     key={amount}
-                    className={`preset-button ${dropCost === amount ? 'active' : ''}`}
-                    onClick={() => playerResources >= amount && setDropCost(amount)}
+                    className={`preset-button ${dropCost === amount ? 'active' : ''} ${playerResources < amount ? 'disabled' : ''}`}
+                    onClick={() => {
+                      if (playerResources >= amount) {
+                        setDropCost(amount);
+                        console.log(`Plinko bet set to: ${amount}`);
+                      }
+                    }}
                     disabled={playerResources < amount}
                   >
-                    {amount}
+                    💰 {amount}
                   </button>
                 ))}
               </div>
