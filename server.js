@@ -22,8 +22,7 @@ app.use(express.static(join(__dirname, 'dist')));
 // Game state
 const games = new Map();
 
-class Game {
-    constructor(id) {
+class Game {    constructor(id) {
         this.id = id;
         this.players = [];
         this.units = [];
@@ -44,6 +43,7 @@ class Game {
         this.resourceGenerationRate = 10; // Start at 10 (slower)
         this.resourceGenerationIncreaseInterval = 20000; // 20 seconds
         this.lastResourceIncrease = Date.now();
+        this.playerPowerups = {}; // Track purchased powerups
     }
 
     addPlayer(playerId, playerName) {
@@ -326,9 +326,8 @@ class Game {
                                 'Knight': 40,
                                 'Archer': 80,
                                 'King': 150
-                            };
-                            const reward = unitReward[unit.unitType] || 10;
-                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward
+                            };                            const reward = unitReward[unit.unitType] || 10;
+                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward;
                             this.units.splice(unitIndex, 1);
                         }
                     }
@@ -427,9 +426,8 @@ class Game {
                                 'Knight': 40,
                                 'Archer': 80,
                                 'King': 150
-                            };
-                            const reward = unitReward[closest.unitType] || 10;
-                            this.playerResources[turret.playerId] = (this.playerResources[turret.playerId] || 0) + reward
+                            };                            const reward = unitReward[closest.unitType] || 10;
+                            this.playerResources[turret.playerId] = (this.playerResources[turret.playerId] || 0) + reward;
                             this.units.splice(idx, 1);
                         }
                     }
@@ -465,12 +463,10 @@ class Game {
                 }
             });
         });
-    }
-
-    startGameLoop() {
+    }    startGameLoop() {
         this.gameLoop = setInterval(() => {
             this.updateGame();
-        }, 100); // Update every 100ms
+        }, 150); // Update every 150ms instead of 100ms for better performance
     }
 
     stopGameLoop() {
@@ -616,9 +612,8 @@ class Game {
                                 'Archer': 80,
                                 'King': 150,
                                 'Wizard': 120
-                            };
-                            const reward = unitReward[target.unitType] || 10;
-                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward
+                            };                            const reward = unitReward[target.unitType] || 10;
+                            this.playerResources[unit.playerId] = (this.playerResources[unit.playerId] || 0) + reward;
                             this.units.splice(targetIndex, 1);
                         }
                     }
@@ -632,13 +627,7 @@ class Game {
                 // Keep units on screen
                 unit.x = Math.max(25, Math.min(1175, unit.x));
             }
-        });
-
-        // === BASE (TOWER) ATTACK LOGIC ===
-        const BASE_ATTACK_RANGE = 120;
-        const BASE_ATTACK_DAMAGE = 10;
-        const BASE_ATTACK_COOLDOWN = 1200; // ms
-
+        });        // === BASE (TOWER) ATTACK LOGIC ===
         this.players.forEach(player => {
             const base = this.playerBases[player.id];
             if (!base) return;
@@ -648,39 +637,96 @@ class Game {
                 this.baseAttackCooldowns[player.id] = 0;
             }
 
+            // Use enhanced base attack stats based on weapon type
+            const baseAttackRange = base.attackRange || 120;
+            const baseAttackDamage = base.damage || 10;
+            const baseAttackCooldown = base.attackCooldown || 1200;
+
             // Find enemy units in range
             const now = Date.now();
-            if (now - this.baseAttackCooldowns[player.id] >= BASE_ATTACK_COOLDOWN) {
+            if (now - this.baseAttackCooldowns[player.id] >= baseAttackCooldown) {
                 const enemyUnits = this.units.filter(
                     unit =>
                         unit.playerId !== player.id &&
-                        Math.abs(unit.x - base.x) <= BASE_ATTACK_RANGE &&
+                        Math.abs(unit.x - base.x) <= baseAttackRange &&
                         // Optional: Only attack units in the same vertical area as the base
                         Math.abs(unit.y - 300) < 300 // covers all lanes
                 );
                 if (enemyUnits.length > 0) {
-                    // Attack the closest enemy unit
-                    let closest = enemyUnits[0];
-                    let minDist = Math.abs(closest.x - base.x);
-                    for (const unit of enemyUnits) {
-                        const dist = Math.abs(unit.x - base.x);
-                        if (dist < minDist) {
-                            closest = unit;
-                            minDist = dist;
+                    // Attack based on weapon type
+                    const weaponType = base.weaponType || 'basic';
+                    let targets = [];
+
+                    if (weaponType === 'arrows' && base.multiHit) {
+                        // Arrows: Multiple targets
+                        const sortedTargets = enemyUnits
+                            .sort((a, b) => Math.abs(a.x - base.x) - Math.abs(b.x - base.x))
+                            .slice(0, base.hitCount || 3);
+                        targets = sortedTargets;
+                    } else {
+                        // Single target for other weapon types
+                        let closest = enemyUnits[0];
+                        let minDist = Math.abs(closest.x - base.x);
+                        for (const unit of enemyUnits) {
+                            const dist = Math.abs(unit.x - base.x);
+                            if (dist < minDist) {
+                                closest = unit;
+                                minDist = dist;
+                            }
                         }
-                    }
-                    
-                    // Create base attack animation
-                    this.createAttackAnimation(base.x, base.y, closest.x, closest.y, 'base');
-                    
-                    closest.health = Math.max(0, closest.health - BASE_ATTACK_DAMAGE);
+                        targets = [closest];
+                    }                    // Attack each target
+                    targets.forEach((target, index) => {
+                        const delay = index * 100; // Stagger attacks for multiple hits
+                        setTimeout(() => {
+                            // Create weapon-specific attack animation
+                            let animationType = 'base';
+                            if (weaponType === 'arrows') animationType = 'base_arrows';
+                            else if (weaponType === 'trebuchet') animationType = 'base_trebuchet';
+                            else if (weaponType === 'wizard') animationType = 'base_lightning';
+
+                            this.createAttackAnimation(base.x, base.y, target.x, target.y, animationType);
+                            
+                            // Apply damage
+                            let damage = baseAttackDamage;
+                            if (weaponType === 'trebuchet' && base.aoe) {
+                                // AOE damage for trebuchet
+                                const aoeRadius = 60;
+                                enemyUnits.forEach(nearbyUnit => {
+                                    const distance = Math.sqrt(
+                                        Math.pow(nearbyUnit.x - target.x, 2) + 
+                                        Math.pow(nearbyUnit.y - target.y, 2)
+                                    );
+                                    if (distance <= aoeRadius) {
+                                        nearbyUnit.health = Math.max(0, nearbyUnit.health - damage);
+                                    }
+                                });
+                            } else {
+                                target.health = Math.max(0, target.health - damage);
+                            }
+
+                            // Handle lightning chain effect for wizard
+                            if (weaponType === 'wizard' && base.lightning) {
+                                const chainTargets = enemyUnits
+                                    .filter(unit => unit.id !== target.id)
+                                    .slice(0, 2); // Chain to 2 additional targets
+                                
+                                chainTargets.forEach((chainTarget, chainIndex) => {
+                                    setTimeout(() => {
+                                        this.createAttackAnimation(target.x, target.y, chainTarget.x, chainTarget.y, 'base_chain_lightning');
+                                        chainTarget.health = Math.max(0, chainTarget.health - Math.floor(damage * 0.7));
+                                    }, (chainIndex + 1) * 150);
+                                });
+                            }
+                        }, delay);
+                    });
+
                     this.baseAttackCooldowns[player.id] = now;
 
-                    // Remove unit if dead
-                    if (closest.health <= 0) {
-                        const idx = this.units.indexOf(closest);
-                        if (idx > -1) this.units.splice(idx, 1);
-                    }
+                    // Remove dead units after a delay to allow animations
+                    setTimeout(() => {
+                        this.units = this.units.filter(unit => unit.health > 0);
+                    }, 500);
                 }
             }
         });
@@ -794,7 +840,32 @@ class Game {
         }
 
         this.units.push(unit);
-        return true;
+        return true;    }
+
+    gamble(playerId) {
+        const GAMBLE_COST = 1000;
+        const WIN_CHANCE = 1/10000; // 0.0001 or 0.01%
+        
+        // Check if player has enough resources
+        if (this.playerResources[playerId] < GAMBLE_COST) {
+            return { success: false, message: 'Not enough resources (1000 required)' };
+        }
+        
+        // Deduct resources
+        this.playerResources[playerId] -= GAMBLE_COST;
+        
+        // Roll the dice
+        const roll = Math.random();
+        
+        if (roll <= WIN_CHANCE) {
+            // Player wins the game instantly!
+            this.gameOver = true;
+            this.winner = this.players.find(p => p.id === playerId);
+            this.stopGameLoop();
+            return { success: true, won: true, message: 'INCREDIBLE! You won the game!' };
+        } else {
+            return { success: true, won: false, message: 'Better luck next time!' };
+        }
     }
 
     reset() {
@@ -818,9 +889,7 @@ class Game {
         if (this.players.length === 2) {
             this.startGameLoop();
         }
-    }
-
-    getGameState() {
+    }    getGameState() {
         return {
             id: this.id,
             players: this.players,
@@ -835,7 +904,8 @@ class Game {
             traps: this.traps,
             turrets: this.turrets,
             mines: this.mines,
-            resourceGenerationRate: this.resourceGenerationRate // <-- add this line
+            resourceGenerationRate: this.resourceGenerationRate,
+            playerPowerups: this.playerPowerups || {}
         };
     }
 }
@@ -944,8 +1014,7 @@ io.on('connection', (socket) => {
             
             // Update the game state
             io.to(gameId).emit('game-updated', game.getGameState());
-        }
-    });
+        }    });
 
     // Upgrade endpoints
     socket.on('upgrade-castle', ({ gameId }) => {
@@ -955,7 +1024,7 @@ io.on('connection', (socket) => {
         if (game && player) {
             const playerBase = game.playerBases[player.id];
             const currentLevel = playerBase.level || 1;
-            const upgradeCost = currentLevel * 200;
+            const upgradeCost = currentLevel * 400; // Much more expensive
             const playerResources = game.playerResources[player.id] || 0;
             
             if (currentLevel >= 5) {
@@ -967,20 +1036,31 @@ io.on('connection', (socket) => {
                 // Deduct resources
                 game.playerResources[player.id] -= upgradeCost;
                 
-                // Upgrade castle
+                // Upgrade castle with enhanced benefits
                 playerBase.level = currentLevel + 1;
-                playerBase.maxHealth += 50;
+                playerBase.maxHealth += 100; // More health per level
                 playerBase.health = playerBase.maxHealth; // Full heal on upgrade
-                playerBase.damage = (playerBase.damage || 10) + 5;
-                playerBase.attackRange = (playerBase.attackRange || 120) + 10;
+                
+                // Recalculate weapon stats based on new level
+                const weaponType = playerBase.weaponType || 'basic';
+                const baseDamage = 15 + (playerBase.level - 1) * 8;
+                const weaponStats = {
+                    basic: { damage: 1.0, range: 120, cooldown: 1200 },
+                    arrows: { damage: 0.6, range: 140, cooldown: 800 },
+                    trebuchet: { damage: 2.2, range: 180, cooldown: 2000 },
+                    wizard: { damage: 1.8, range: 160, cooldown: 1500 }
+                };
+                
+                const stats = weaponStats[weaponType];
+                playerBase.damage = Math.round(baseDamage * stats.damage);
+                playerBase.attackRange = stats.range + (playerBase.level - 1) * 10; // Increased range per level
                 
                 console.log(`Player ${player.id} upgraded castle to level ${playerBase.level}`);
                 socket.emit('castle-upgraded', { success: true });
                 io.to(gameId).emit('game-updated', game.getGameState());
             } else {
                 socket.emit('castle-upgraded', { success: false, message: 'Not enough resources' });
-            }
-        }
+            }        }
     });
 
     socket.on('change-castle-weapon', ({ gameId, weaponType }) => {
@@ -990,38 +1070,61 @@ io.on('connection', (socket) => {
         if (game && player) {
             const playerBase = game.playerBases[player.id];
             const currentLevel = playerBase.level || 1;
+            const playerResources = game.playerResources[player.id] || 0;
             
-            // Check if weapon is unlocked
+            // Check if weapon is unlocked and player has enough resources
             const weaponRequirements = {
                 basic: 1,
                 arrows: 2,
                 trebuchet: 3,
                 wizard: 4
             };
+
+            // Enhanced weapon costs and switching fees
+            const weaponSwitchCosts = {
+                basic: 0,      // Free weapon
+                arrows: 150,   // Cost to switch to or first purchase
+                trebuchet: 300,
+                wizard: 500
+            };
+
+            const weaponStats = {
+                basic: { damage: 1.0, range: 120, cooldown: 1200, multiHit: false },
+                arrows: { damage: 0.6, range: 140, cooldown: 800, multiHit: true, hitCount: 3 },
+                trebuchet: { damage: 2.2, range: 180, cooldown: 2000, multiHit: false, aoe: true },
+                wizard: { damage: 1.8, range: 160, cooldown: 1500, multiHit: false, lightning: true }
+            };
             
-            if (currentLevel >= weaponRequirements[weaponType]) {
+            const switchCost = weaponSwitchCosts[weaponType];
+            const isCurrentWeapon = playerBase.weaponType === weaponType;
+            
+            if (currentLevel >= weaponRequirements[weaponType] && playerResources >= switchCost && !isCurrentWeapon) {
+                // Deduct switching cost
+                game.playerResources[player.id] -= switchCost;
+                
+                // Set weapon type
                 playerBase.weaponType = weaponType;
                 
-                // Adjust damage based on weapon type
-                const baseDamage = 10 + (currentLevel - 1) * 5;
-                switch (weaponType) {
-                    case 'basic':
-                        playerBase.damage = baseDamage;
-                        break;
-                    case 'arrows':
-                        playerBase.damage = baseDamage * 0.8; // Lower per arrow but multiple arrows
-                        break;
-                    case 'trebuchet':
-                        playerBase.damage = baseDamage * 1.5;
-                        break;
-                    case 'wizard':
-                        playerBase.damage = baseDamage * 1.2;
-                        break;
-                }
+                // Apply weapon stats
+                const baseDamage = 15 + (currentLevel - 1) * 8; // Increased base damage
+                const stats = weaponStats[weaponType];
                 
-                console.log(`Player ${player.id} changed castle weapon to ${weaponType}`);
+                playerBase.damage = Math.round(baseDamage * stats.damage);
+                playerBase.attackRange = stats.range;
+                playerBase.attackCooldown = stats.cooldown;
+                playerBase.multiHit = stats.multiHit || false;
+                playerBase.hitCount = stats.hitCount || 1;
+                playerBase.aoe = stats.aoe || false;
+                playerBase.lightning = stats.lightning || false;
+                
+                console.log(`Player ${player.id} changed castle weapon to ${weaponType} for ${switchCost} resources`);
+                socket.emit('weapon-changed', { success: true });
                 io.to(gameId).emit('game-updated', game.getGameState());
-            }
+            } else {
+                const reason = currentLevel < weaponRequirements[weaponType] ? 'Weapon not unlocked' :
+                              isCurrentWeapon ? 'Already using this weapon' :
+                              'Not enough resources';
+                socket.emit('weapon-changed', { success: false, message: reason });            }
         }
     });
 
@@ -1031,25 +1134,29 @@ io.on('connection', (socket) => {
         
         if (game && player) {
             const turret = game.turrets.find(t => t.id === turretId && t.playerId === player.id);
-            const upgradeCost = 100;
+            const currentLevel = turret ? (turret.level || 1) : 1;
+            const upgradeCost = 150 * currentLevel; // Much more expensive, scales with level
             const playerResources = game.playerResources[player.id] || 0;
             
-            if (turret && playerResources >= upgradeCost) {
+            if (turret && playerResources >= upgradeCost && currentLevel < 5) {
                 // Deduct resources
                 game.playerResources[player.id] -= upgradeCost;
                 
-                // Upgrade turret
-                turret.damage = Math.round(turret.damage * 1.5);
-                turret.attackRange = Math.round(turret.attackRange * 1.2);
-                turret.maxHealth = Math.round(turret.maxHealth * 1.3);
+                // Upgrade turret with more significant improvements
+                turret.level = currentLevel + 1;
+                turret.damage = Math.round(turret.damage * 1.8); // Bigger damage increase
+                turret.attackRange = Math.round(turret.attackRange * 1.3); // Better range increase
+                turret.maxHealth = Math.round(turret.maxHealth * 1.5); // More health
                 turret.health = turret.maxHealth; // Full heal on upgrade
-                turret.level = (turret.level || 1) + 1;
+                turret.attackCooldown = Math.max(300, turret.attackCooldown * 0.85); // Faster attacks
                 
-                console.log(`Player ${player.id} upgraded turret ${turretId}`);
+                console.log(`Player ${player.id} upgraded turret ${turretId} to level ${turret.level}`);
                 socket.emit('turret-upgraded', { success: true });
                 io.to(gameId).emit('game-updated', game.getGameState());
             } else {
-                socket.emit('turret-upgraded', { success: false, message: turret ? 'Not enough resources' : 'Turret not found' });
+                const reason = !turret ? 'Turret not found' : 
+                             currentLevel >= 5 ? 'Maximum level reached' : 
+                             'Not enough resources';                socket.emit('turret-upgraded', { success: false, message: reason });
             }
         }
     });
@@ -1060,22 +1167,26 @@ io.on('connection', (socket) => {
         
         if (game && player) {
             const trap = game.traps.find(t => t.id === trapId && t.playerId === player.id);
-            const upgradeCost = 75;
+            const currentLevel = trap ? (trap.level || 1) : 1;
+            const upgradeCost = 100 * currentLevel; // More expensive and scaling
             const playerResources = game.playerResources[player.id] || 0;
             
-            if (trap && playerResources >= upgradeCost) {
+            if (trap && playerResources >= upgradeCost && currentLevel < 3) {
                 // Deduct resources
                 game.playerResources[player.id] -= upgradeCost;
                 
-                // Upgrade trap
-                trap.damage = Math.round(trap.damage * 1.5);
-                trap.level = (trap.level || 1) + 1;
+                // Upgrade trap with significant improvements
+                trap.damage = Math.round(trap.damage * 1.8);
+                trap.level = currentLevel + 1;
                 
-                console.log(`Player ${player.id} upgraded trap ${trapId}`);
+                console.log(`Player ${player.id} upgraded trap ${trapId} to level ${trap.level}`);
                 socket.emit('trap-upgraded', { success: true });
                 io.to(gameId).emit('game-updated', game.getGameState());
             } else {
-                socket.emit('trap-upgraded', { success: false, message: trap ? 'Not enough resources' : 'Trap not found' });
+                const reason = !trap ? 'Trap not found' : 
+                             currentLevel >= 3 ? 'Maximum level reached' : 
+                             'Not enough resources';
+                socket.emit('trap-upgraded', { success: false, message: reason });
             }
         }
     });
@@ -1086,23 +1197,85 @@ io.on('connection', (socket) => {
         
         if (game && player) {
             const mine = game.mines.find(m => m.id === mineId && m.playerId === player.id);
-            const upgradeCost = 100;
+            const currentLevel = mine ? (mine.level || 1) : 1;
+            const upgradeCost = 125 * currentLevel; // More expensive and scaling
             const playerResources = game.playerResources[player.id] || 0;
             
-            if (mine && playerResources >= upgradeCost) {
+            if (mine && playerResources >= upgradeCost && currentLevel < 3) {
                 // Deduct resources
                 game.playerResources[player.id] -= upgradeCost;
                 
-                // Upgrade mine
-                mine.damage = Math.round(mine.damage * 1.5);
-                mine.explosionRadius = Math.round(mine.explosionRadius * 1.2);
-                mine.level = (mine.level || 1) + 1;
+                // Upgrade mine with significant improvements
+                mine.damage = Math.round(mine.damage * 1.6);
+                mine.explosionRadius = Math.round(mine.explosionRadius * 1.3);
+                mine.level = currentLevel + 1;
                 
-                console.log(`Player ${player.id} upgraded mine ${mineId}`);
+                console.log(`Player ${player.id} upgraded mine ${mineId} to level ${mine.level}`);
                 socket.emit('mine-upgraded', { success: true });
                 io.to(gameId).emit('game-updated', game.getGameState());
             } else {
-                socket.emit('mine-upgraded', { success: false, message: mine ? 'Not enough resources' : 'Mine not found' });
+                const reason = !mine ? 'Mine not found' : 
+                             currentLevel >= 3 ? 'Maximum level reached' : 
+                             'Not enough resources';
+                socket.emit('mine-upgraded', { success: false, message: reason });
+            }
+        }    });
+
+    socket.on('purchase-powerup', ({ gameId, unitType, powerupName, cost }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const playerResources = game.playerResources[player.id] || 0;
+            
+            // Initialize powerups structure if it doesn't exist
+            if (!game.playerPowerups) {
+                game.playerPowerups = {};
+            }
+            if (!game.playerPowerups[player.id]) {
+                game.playerPowerups[player.id] = {};
+            }
+            if (!game.playerPowerups[player.id][unitType]) {
+                game.playerPowerups[player.id][unitType] = {};
+            }
+            
+            // Check if powerup is already purchased
+            const isAlreadyPurchased = game.playerPowerups[player.id][unitType][powerupName];
+            
+            if (!isAlreadyPurchased && playerResources >= cost) {
+                // Deduct resources
+                game.playerResources[player.id] -= cost;
+                
+                // Mark powerup as purchased
+                game.playerPowerups[player.id][unitType][powerupName] = true;
+                
+                console.log(`Player ${player.id} purchased ${powerupName} for ${unitType} (${cost} resources)`);
+                socket.emit('powerup-purchased', { success: true });
+                io.to(gameId).emit('game-updated', game.getGameState());
+            } else {
+                const reason = isAlreadyPurchased ? 'Already purchased' : 'Not enough resources';
+                socket.emit('powerup-purchased', { success: false, message: reason });
+            }
+        }    });
+
+    socket.on('gamble', ({ gameId }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const result = game.gamble(player.id);
+            socket.emit('gamble-result', result);
+            
+            if (result.success) {
+                io.to(gameId).emit('game-updated', game.getGameState());
+                
+                // If they won, emit special celebration
+                if (result.won) {
+                    io.to(gameId).emit('gamble-victory', { 
+                        winner: player.name,
+                        message: result.message 
+                    });
+                }
             }
         }
     });
@@ -1112,8 +1285,7 @@ io.on('connection', (socket) => {
 
         // Clean up games when players disconnect
         games.forEach((game, gameId) => {
-            const playerIndex = game.players.findIndex(p => p.id === socket.id);
-            if (playerIndex !== -1) {
+            const playerIndex = game.players.findIndex(p => p.id === socket.id);            if (playerIndex !== -1) {
                 game.stopGameLoop();
                 game.players.splice(playerIndex, 1);
                 if (game.players.length === 0) {

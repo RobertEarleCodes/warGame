@@ -2,15 +2,15 @@
   "name": "projectbird",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
-  "scripts": {
+  "type": "module",  "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
     "dev:host": "concurrently \"npm run server\" \"vite --host\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server.js",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && npm run server",
+    "heroku-postbuild": "npm run build"
   },
   "dependencies": {
     "bootstrap": "^5.3.7",

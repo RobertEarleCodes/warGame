@@ -52,6 +52,7 @@ interface Trap {
   damage: number;
   triggered: boolean;
   type: string;
+  level: number;
 }
 
 interface Turret {
@@ -66,6 +67,7 @@ interface Turret {
   attackCooldown: number;
   lastAttackTime: number;
   type: string;
+  level: number;
 }
 
 interface Mine {
@@ -77,6 +79,7 @@ interface Mine {
   explosionRadius: number;
   triggered: boolean;
   type: string;
+  level: number;
 }
 
 interface GameState {
@@ -92,7 +95,29 @@ interface GameState {
   traps: Trap[];
   turrets: Turret[];
   mines: Mine[];
+  resourceGenerationRate: number;
+  playerPowerups?: { [playerId: string]: { [unitType: string]: { [powerupName: string]: boolean } } };
 }
+
+// Helper function to adjust color intensity
+function adjustColorIntensity(color: string, intensity: number): string {
+  // Convert hex color to RGB
+  const hex = color.replace('#', '');
+  const r = parseInt(hex.substr(0, 2), 16);
+  const g = parseInt(hex.substr(2, 2), 16);
+  const b = parseInt(hex.substr(4, 2), 16);
+  
+  // Adjust intensity
+  const newR = Math.round(r * intensity);
+  const newG = Math.round(g * intensity);
+  const newB = Math.round(b * intensity);
+  
+  // Convert back to hex
+  return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+}
+
+// Define lanes array
+const LANES = [0, 1, 2]; // 3 lanes (0-indexed)
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -101,12 +126,10 @@ function App() {
   const [gameId, setGameId] = useState<string>('');
   const [playerName, setPlayerName] = useState<string>('');
   const [serverIP, setServerIP] = useState<string>('localhost:3001');
-  const [customServerEnabled, setCustomServerEnabled] = useState<boolean>(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [playerIndex, setPlayerIndex] = useState<number>(-1);
-  const [plinkoReward, setPlinkoReward] = useState(0);
   const [placementMode, setPlacementMode] = useState<'trap' | 'turret' | 'mine'>('trap');
-  const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info' | 'castle'>('units');
+  const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info' | 'castle' | 'upgrades'>('units');
   const [selectedTurret, setSelectedTurret] = useState<string | null>(null);
   const [selectedTrap, setSelectedTrap] = useState<string | null>(null);
   const [selectedMine, setSelectedMine] = useState<string | null>(null);
@@ -271,6 +294,28 @@ function App() {
 
       newSocket.on('powerup-purchased', () => {
         console.log('Powerup purchased successfully!');
+      });      newSocket.on('weapon-changed', (data) => {
+        if (data.success) {
+          console.log('Castle weapon changed successfully!');
+        } else {
+          console.log('Failed to change weapon:', data.message);
+        }
+      });
+
+      newSocket.on('gamble-result', (data) => {
+        if (data.success) {
+          if (data.won) {
+            alert(`🎉 INCREDIBLE! You won the gamble! ${data.message}`);
+          } else {
+            console.log('Gamble failed - better luck next time!');
+          }
+        } else {
+          alert(`Gamble failed: ${data.message}`);
+        }
+      });
+
+      newSocket.on('gamble-victory', (data) => {
+        alert(`🏆 GAME OVER! ${data.winner} won the entire game by gambling! ${data.message}`);
       });
 
       return () => {
@@ -281,16 +326,12 @@ function App() {
       console.error('Error setting up socket:', err);
       setError(`Setup error: ${err}`);
     }
-  }, [serverIP]);
-
-  // Update server IP dynamically based on user input or environment
+  }, [serverIP]);  // Update server IP dynamically based on user input or environment
   useEffect(() => {
-    const ip = '192.168.4.85'; // Replace with your local IP address
-    const port = '3001'; // Replace with your server port
-    setServerIP(`${ip}:${port}`);
-  }, []);
-
-  // Canvas rendering - only re-render when gameState or canvas size changes
+    // Use environment variable for production, fallback to localhost for development
+    const serverUrl = import.meta.env.VITE_SERVER_URL || 'localhost:3001';
+    setServerIP(serverUrl);
+  }, []);// Canvas rendering - optimized for better performance
   useEffect(() => {
     if (!gameState || !canvasRef.current) return;
 
@@ -298,81 +339,332 @@ function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    try {
-      // Calculate scaling factors based on standard 1200x600 game coordinates
-      const STANDARD_WIDTH = 1200;
-      const STANDARD_HEIGHT = 600;
-      const scaleX = canvas.width / STANDARD_WIDTH;
-      const scaleY = canvas.height / STANDARD_HEIGHT;
+    // Performance optimization: limit frame rate
+    let lastFrameTime = 0;
+    const targetFPS = 30; // Reduced from 60 for better performance
+    const frameInterval = 1000 / targetFPS;
 
-      // Apply scaling transformation
-      ctx.save();
-      ctx.scale(scaleX, scaleY);
-
-      // Clear canvas (using standard dimensions since we're scaled)
-      ctx.clearRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
-      
-      // Draw battlefield background with enhanced effects
-      const gradient = ctx.createLinearGradient(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
-      gradient.addColorStop(0, '#0a0a1a');
-      gradient.addColorStop(0.3, '#1a0a2e');
-      gradient.addColorStop(0.7, '#2d1b69');
-      gradient.addColorStop(1, '#0a0a1a');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
-      
-      // Add energy grid pattern
-      ctx.strokeStyle = 'rgba(131, 56, 236, 0.2)';
-      ctx.lineWidth = 1;
-      const gridSize = 50;
-      for (let x = 0; x <= STANDARD_WIDTH; x += gridSize) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, STANDARD_HEIGHT);
-        ctx.stroke();
+    const render = (currentTime: number) => {
+      if (currentTime - lastFrameTime < frameInterval) {
+        requestAnimationFrame(render);
+        return;
       }
-      for (let y = 0; y <= STANDARD_HEIGHT; y += gridSize) {
+      lastFrameTime = currentTime;
+
+      try {
+        // Calculate scaling factors based on standard 1200x600 game coordinates
+        const STANDARD_WIDTH = 1200;
+        const STANDARD_HEIGHT = 600;
+        const scaleX = canvas.width / STANDARD_WIDTH;
+        const scaleY = canvas.height / STANDARD_HEIGHT;
+
+        // Apply scaling transformation
+        ctx.save();
+        ctx.scale(scaleX, scaleY);
+
+        // Clear canvas (using standard dimensions since we're scaled)
+        ctx.clearRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
+        
+        // Simplified background - no complex gradients for performance
+        ctx.fillStyle = '#1a0a2e';
+        ctx.fillRect(0, 0, STANDARD_WIDTH, STANDARD_HEIGHT);
+        
+        // Simplified grid pattern (fewer lines)
+        ctx.strokeStyle = 'rgba(131, 56, 236, 0.15)';
+        ctx.lineWidth = 1;
+        const gridSize = 100; // Larger grid for fewer lines
+        for (let x = 0; x <= STANDARD_WIDTH; x += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, STANDARD_HEIGHT);
+          ctx.stroke();
+        }
+        for (let y = 0; y <= STANDARD_HEIGHT; y += gridSize) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(STANDARD_WIDTH, y);
+          ctx.stroke();
+        }
+          // Simplified center line
+        ctx.strokeStyle = '#ff006e';
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(STANDARD_WIDTH, y);
+        ctx.moveTo(STANDARD_WIDTH / 2, 0);
+        ctx.lineTo(STANDARD_WIDTH / 2, STANDARD_HEIGHT);
         ctx.stroke();
-      }
-      
-      // Draw enhanced center line with glow effect
-      const centerGradient = ctx.createLinearGradient(STANDARD_WIDTH / 2 - 10, 0, STANDARD_WIDTH / 2 + 10, 0);
-      centerGradient.addColorStop(0, 'rgba(255, 0, 110, 0)');
-      centerGradient.addColorStop(0.5, 'rgba(255, 0, 110, 0.8)');
-      centerGradient.addColorStop(1, 'rgba(255, 0, 110, 0)');
-      
-      ctx.fillStyle = centerGradient;
-      ctx.fillRect(STANDARD_WIDTH / 2 - 10, 0, 20, STANDARD_HEIGHT);
-      
-      ctx.strokeStyle = '#ff006e';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#ff006e';
-      ctx.shadowBlur = 15;
-      ctx.setLineDash([15, 10]);
-      ctx.beginPath();
-      ctx.moveTo(STANDARD_WIDTH / 2, 0);
-      ctx.lineTo(STANDARD_WIDTH / 2, STANDARD_HEIGHT);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.shadowBlur = 0;
 
-      // Draw bases
-      if (gameState.playerBases) {
-        Object.entries(gameState.playerBases).forEach(([playerId, base]) => {
-          const player = gameState.players.find(p => p.id === playerId);
-          if (!player) return;
+        // Draw enhanced bases with weapon-specific appearance (optimized)
+        if (gameState.playerBases) {
+          Object.entries(gameState.playerBases).forEach(([playerId, base]) => {
+            const player = gameState.players.find((p: Player) => p.id === playerId);            if (!player) return;
 
-          ctx.fillStyle = player.color;
-          ctx.fillRect(base.x - 20, base.y - 30, 40, 60);
+            const baseAny = base as any;
+            ctx.save();
+            const castleLevel = baseAny.level || 1;
+            const weaponType = baseAny.weaponType || 'basic';
+            
+            // Base size increases with level
+            const baseWidth = 40 + (castleLevel * 5);
+            const baseHeight = 60 + (castleLevel * 8);
+            
+            // Enhanced base color with level intensity
+            const baseIntensity = Math.min(1, 0.7 + (castleLevel * 0.06));
+            const enhancedColor = adjustColorIntensity(player.color, baseIntensity);
+            
+            // === WEAPON-SPECIFIC CASTLE DESIGNS (SIMPLIFIED) ===
+            
+            if (weaponType === 'basic') {
+              // Traditional medieval castle
+              ctx.fillStyle = enhancedColor;
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 2 + castleLevel;
+              ctx.fillRect(baseAny.x - baseWidth/2, baseAny.y - baseHeight/2, baseWidth, baseHeight);
+              ctx.strokeRect(baseAny.x - baseWidth/2, baseAny.y - baseHeight/2, baseWidth, baseHeight);
+              
+              // Simplified battlements
+              const merlonWidth = baseWidth / 6;
+              for (let i = 0; i < 4; i++) {
+                const merlonX = baseAny.x - baseWidth/2 + (i * merlonWidth * 1.5);
+                ctx.fillRect(merlonX, baseAny.y - baseHeight/2 - 8, merlonWidth, 8);
+              }
+              
+              // Castle gate
+              ctx.fillStyle = '#654321';
+              ctx.fillRect(baseAny.x - 8, baseAny.y + baseHeight/2 - 15, 16, 15);
+              
+            } else if (weaponType === 'arrows') {
+              // Simplified archer fortress
+              ctx.fillStyle = enhancedColor;
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 2 + castleLevel;
+              
+              // Main keep
+              ctx.fillRect(baseAny.x - baseWidth/2, baseAny.y - baseHeight/2, baseWidth, baseHeight);
+              ctx.strokeRect(baseAny.x - baseWidth/2, baseAny.y - baseHeight/2, baseWidth, baseHeight);
+              
+              // Simplified towers
+              const towerWidth = 12;
+              const towerHeight = baseHeight + 15;
+              
+              // Left tower
+              ctx.fillRect(baseAny.x - baseWidth/2 - towerWidth, baseAny.y - towerHeight/2, towerWidth, towerHeight);
+              ctx.strokeRect(baseAny.x - baseWidth/2 - towerWidth, baseAny.y - towerHeight/2, towerWidth, towerHeight);
+              
+              // Right tower
+              ctx.fillRect(baseAny.x + baseWidth/2, baseAny.y - towerHeight/2, towerWidth, towerHeight);
+              ctx.strokeRect(baseAny.x + baseWidth/2, baseAny.y - towerHeight/2, towerWidth, towerHeight);
+            
+              // Arrow slits on main building
+              ctx.fillStyle = '#000';
+              for (let i = 0; i < 4; i++) {
+                const slitY = baseAny.y - baseHeight/2 + 8 + (i * 12);
+                ctx.fillRect(baseAny.x - 1, slitY, 2, 8);
+              }
+            
+              // Arrow slits on towers
+              for (let i = 0; i < 3; i++) {
+                const slitY = baseAny.y - towerHeight/2 + 10 + (i * 15);
+                ctx.fillRect(baseAny.x - baseWidth/2 - towerWidth/2 - 1, slitY, 2, 6);
+                ctx.fillRect(baseAny.x + baseWidth/2 + towerWidth/2 - 1, slitY, 2, 6);
+              }
+            
+              // Tower tops with pointed roofs
+              ctx.fillStyle = '#8B4513';
+              ctx.beginPath();
+              ctx.moveTo(baseAny.x - baseWidth/2 - towerWidth/2, baseAny.y - towerHeight/2);
+              ctx.lineTo(baseAny.x - baseWidth/2 - towerWidth/2 - 6, baseAny.y - towerHeight/2 - 12);
+              ctx.lineTo(baseAny.x - baseWidth/2 - towerWidth/2 + 6, baseAny.y - towerHeight/2 - 12);
+              ctx.closePath();
+              ctx.fill();
+            
+              ctx.beginPath();
+              ctx.moveTo(baseAny.x + baseWidth/2 + towerWidth/2, baseAny.y - towerHeight/2);
+              ctx.lineTo(baseAny.x + baseWidth/2 + towerWidth/2 - 6, baseAny.y - towerHeight/2 - 12);
+              ctx.lineTo(baseAny.x + baseWidth/2 + towerWidth/2 + 6, baseAny.y - towerHeight/2 - 12);
+              ctx.closePath();
+              ctx.fill();
+            
+            } else if (weaponType === 'trebuchet') {
+              // Siege fortress with trebuchet platform
+              ctx.fillStyle = enhancedColor;
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 3 + castleLevel;
+            
+              // Wider, more fortified base
+              const fortBaseWidth = baseWidth + 10;
+              const fortBaseHeight = baseHeight + 5;
+              ctx.fillRect(baseAny.x - fortBaseWidth/2, baseAny.y - fortBaseHeight/2, fortBaseWidth, fortBaseHeight);
+              ctx.strokeRect(baseAny.x - fortBaseWidth/2, baseAny.y - fortBaseHeight/2, fortBaseWidth, fortBaseHeight);
+            
+              // Trebuchet platform on top
+              ctx.fillStyle = '#8B4513';
+              ctx.fillRect(baseAny.x - 15, baseAny.y - fortBaseHeight/2 - 8, 30, 8);
+              ctx.strokeRect(baseAny.x - 15, baseAny.y - fortBaseHeight/2 - 8, 30, 8);
+            
+              // Trebuchet arm mechanism
+              ctx.strokeStyle = '#654321';
+              ctx.lineWidth = 6;
+              ctx.beginPath();
+              ctx.moveTo(baseAny.x - 5, baseAny.y - fortBaseHeight/2 - 4);              ctx.lineTo(baseAny.x + 20, baseAny.y - fortBaseHeight/2 - 25);
+              ctx.stroke();
+            
+              // Counterweight
+              ctx.fillStyle = '#2C2C2C';
+              ctx.beginPath();
+              ctx.arc(baseAny.x - 10, baseAny.y - fortBaseHeight/2 - 8, 8, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Boulder in sling
+            ctx.fillStyle = '#8B7355';
+            ctx.beginPath();
+            ctx.arc(base.x + 22, base.y - fortBaseHeight/2 - 27, 4, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Support beams
+            ctx.strokeStyle = '#654321';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(base.x - 12, base.y - fortBaseHeight/2);
+            ctx.lineTo(base.x - 5, base.y - fortBaseHeight/2 - 15);
+            ctx.moveTo(base.x + 2, base.y - fortBaseHeight/2);
+            ctx.lineTo(base.x - 5, base.y - fortBaseHeight/2 - 15);
+            ctx.stroke();
+            
+            // Reinforced walls
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < 3; i++) {
+              ctx.beginPath();
+              ctx.moveTo(base.x - fortBaseWidth/2 + 5, base.y - fortBaseHeight/2 + (i * 10));
+              ctx.lineTo(base.x + fortBaseWidth/2 - 5, base.y - fortBaseHeight/2 + (i * 10));
+              ctx.stroke();
+            }
+            
+          } else if (weaponType === 'wizard') {
+            // Magical wizard tower
+            ctx.fillStyle = enhancedColor;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2 + castleLevel;
+            
+            // Cylindrical tower base
+            ctx.beginPath();
+            ctx.ellipse(base.x, base.y, baseWidth/2, baseHeight/2, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Magical spire
+            const spireHeight = 35;
+            ctx.fillStyle = '#4B0082';
+            ctx.beginPath();
+            ctx.moveTo(base.x, base.y - baseHeight/2 - spireHeight);
+            ctx.lineTo(base.x - 12, base.y - baseHeight/2);
+            ctx.lineTo(base.x + 12, base.y - baseHeight/2);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.stroke();
+            
+            // Magical orb at top
+            ctx.fillStyle = '#00FFFF';
+            ctx.shadowColor = '#00FFFF';
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.arc(base.x, base.y - baseHeight/2 - spireHeight + 8, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            // Magical energy rings around tower
+            const now = Date.now();
+            for (let i = 0; i < 3; i++) {
+              ctx.strokeStyle = '#9966FF';
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 0.3 + Math.sin(now * 0.005 + i) * 0.2;
+              ctx.beginPath();
+              ctx.arc(base.x, base.y, baseWidth/2 + 8 + (i * 6), 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            ctx.globalAlpha = 1.0;
+            
+            // Mystical windows with glowing effects
+            ctx.fillStyle = '#FFD700';
+            ctx.shadowColor = '#FFD700';
+            ctx.shadowBlur = 8;
+            for (let i = 0; i < 4; i++) {
+              const angle = (i * Math.PI) / 2;
+              const windowX = base.x + Math.cos(angle) * (baseWidth/2 - 3);
+              const windowY = base.y + Math.sin(angle) * (baseHeight/2 - 8);
+              ctx.beginPath();
+              ctx.arc(windowX, windowY, 3, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.shadowBlur = 0;
+            
+            // Floating runes around the tower
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#9966FF';
+            ctx.shadowColor = '#9966FF';
+            ctx.shadowBlur = 5;
+            const runes = ['ᚱ', 'ᚦ', 'ᚨ', 'ᛗ'];
+            for (let i = 0; i < 4; i++) {
+              const angle = now * 0.002 + (i * Math.PI / 2);
+              const runeX = base.x + Math.cos(angle) * (baseWidth + 15);
+              const runeY = base.y + Math.sin(angle) * (baseHeight/2 + 10);
+              ctx.fillText(runes[i], runeX - 6, runeY + 4);
+            }
+            ctx.shadowBlur = 0;
+          }
           
-          // === Draw base attack range circle ===
-          const BASE_ATTACK_RANGE = 120;
+          // Add level indicator
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 14px Arial';
+          ctx.textAlign = 'center';
+          ctx.shadowColor = '#000';
+          ctx.shadowBlur = 3;
+          ctx.fillText(`L${castleLevel}`, base.x, base.y + baseHeight/2 + 20);
+          ctx.shadowBlur = 0;
+          
+          // Add decorative elements for high levels
+          if (castleLevel >= 3) {
+            ctx.strokeStyle = '#FFD700'; // Gold accent
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.7;
+            if (weaponType === 'wizard') {
+              ctx.beginPath();
+              ctx.ellipse(base.x, base.y, baseWidth/2 + 3, baseHeight/2 + 3, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            } else {
+              ctx.beginPath();
+              ctx.strokeRect(base.x - baseWidth/2 - 3, base.y - baseHeight/2 - 3, baseWidth + 6, baseHeight + 6);
+            }
+            ctx.globalAlpha = 1.0;
+          }
+          
+          if (castleLevel >= 5) {
+            // Add energy aura for max level
+            const now = Date.now();
+            ctx.strokeStyle = '#00FFFF';
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.4 + Math.sin(now * 0.008) * 0.3;
+            if (weaponType === 'wizard') {
+              ctx.beginPath();
+              ctx.ellipse(base.x, base.y, baseWidth/2 + 8, baseHeight/2 + 8, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            } else {
+              ctx.beginPath();
+              ctx.strokeRect(base.x - baseWidth/2 - 8, base.y - baseHeight/2 - 8, baseWidth + 16, baseHeight + 16);
+            }
+            ctx.globalAlpha = 1.0;
+          }
+          
+          ctx.restore();          
+          // === Draw base attack range circle (weapon-specific) ===
+          const weaponAttackRange = (base as any).attackRange || 120;
           ctx.save();
           ctx.beginPath();
-          ctx.arc(base.x, base.y, BASE_ATTACK_RANGE, 0, Math.PI * 2);
+          ctx.arc(base.x, base.y, weaponAttackRange, 0, Math.PI * 2);
           ctx.strokeStyle = player.color;
           ctx.globalAlpha = 0.15;
           ctx.lineWidth = 3;
@@ -381,12 +673,24 @@ function App() {
           ctx.restore();
           // === End base attack range circle ===
 
-          // Base health bar
+          // Enhanced base health bar
           const healthPercent = base.health / base.maxHealth;
-          ctx.fillStyle = 'red';
-          ctx.fillRect(base.x - 20, base.y - 40, 40, 8);
-          ctx.fillStyle = 'green';
-          ctx.fillRect(base.x - 20, base.y - 40, 40 * healthPercent, 8);
+          const barWidth = baseWidth;
+          const barHeight = 6;
+          const barY = base.y - baseHeight/2 - 15;
+          
+          // Health bar background
+          ctx.fillStyle = '#333';
+          ctx.fillRect(base.x - barWidth/2, barY, barWidth, barHeight);
+          
+          // Health bar fill with gradient
+          const healthGradient = ctx.createLinearGradient(base.x - barWidth/2, barY, base.x + barWidth/2, barY);
+          const healthColor = healthPercent > 0.6 ? '#4CAF50' : healthPercent > 0.3 ? '#FFC107' : '#F44336';
+          healthGradient.addColorStop(0, healthColor);
+          healthGradient.addColorStop(1, `${healthColor}80`);
+          
+          ctx.fillStyle = healthGradient;
+          ctx.fillRect(base.x - barWidth/2, barY, barWidth * healthPercent, barHeight);
         });
       }
 
@@ -1150,6 +1454,389 @@ function App() {
                 ctx.lineTo(starX, starY);
                 ctx.stroke();
               }
+                ctx.restore();
+              
+            } else if (anim.type === 'base_arrows') {
+              // Multiple arrow attack from castle
+              ctx.save();
+              
+              // Draw 3 arrows in formation
+              for (let arrowIndex = 0; arrowIndex < 3; arrowIndex++) {
+                const arrowOffset = (arrowIndex - 1) * 8; // Spread arrows vertically
+                const arrowCurrentX = anim.fromX + (anim.toX - anim.fromX) * progress;
+                const arrowCurrentY = anim.fromY + (anim.toY - anim.fromY) * progress + arrowOffset;
+                
+                // Arrow body
+                ctx.fillStyle = '#8B4513';
+                ctx.shadowColor = '#8B4513';
+                ctx.shadowBlur = 5;
+                ctx.beginPath();
+                ctx.ellipse(arrowCurrentX, arrowCurrentY, 8, 2, Math.atan2(anim.toY - anim.fromY, anim.toX - anim.fromX), 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Arrow head
+                ctx.fillStyle = '#C0C0C0';
+                ctx.shadowColor = '#C0C0C0';
+                ctx.shadowBlur = 8;
+                const arrowAngle = Math.atan2(anim.toY - anim.fromY, anim.toX - anim.fromX);
+                const headX = arrowCurrentX + Math.cos(arrowAngle) * 6;
+                const headY = arrowCurrentY + Math.sin(arrowAngle) * 6;
+                ctx.beginPath();
+                ctx.moveTo(headX, headY);
+                ctx.lineTo(headX - Math.cos(arrowAngle + 0.5) * 5, headY - Math.sin(arrowAngle + 0.5) * 5);
+                ctx.lineTo(headX - Math.cos(arrowAngle - 0.5) * 5, headY - Math.sin(arrowAngle - 0.5) * 5);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Arrow fletching
+                ctx.strokeStyle = '#654321';
+                ctx.lineWidth = 2;
+                ctx.shadowBlur = 3;
+                const fletchX = arrowCurrentX - Math.cos(arrowAngle) * 6;
+                const fletchY = arrowCurrentY - Math.sin(arrowAngle) * 6;
+                ctx.beginPath();
+                ctx.moveTo(fletchX + Math.cos(arrowAngle + Math.PI/2) * 3, fletchY + Math.sin(arrowAngle + Math.PI/2) * 3);
+                ctx.lineTo(fletchX - Math.cos(arrowAngle + Math.PI/2) * 3, fletchY - Math.sin(arrowAngle + Math.PI/2) * 3);
+                ctx.stroke();
+              }
+              
+              // Wind trail effect
+              ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+              ctx.lineWidth = 1;
+              ctx.setLineDash([3, 3]);
+              ctx.beginPath();
+              ctx.moveTo(anim.fromX, anim.fromY - 8);
+              ctx.lineTo(currentX, currentY - 8);
+              ctx.moveTo(anim.fromX, anim.fromY);
+              ctx.lineTo(currentX, currentY);
+              ctx.moveTo(anim.fromX, anim.fromY + 8);
+              ctx.lineTo(currentX, currentY + 8);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              
+              ctx.restore();
+              
+            } else if (anim.type === 'base_trebuchet') {
+              // Large boulder projectile with AOE impact
+              ctx.save();
+              
+              // Boulder with rotation
+              const boulderRotation = progress * Math.PI * 4; // Spinning effect
+              ctx.fillStyle = '#8B7355';
+              ctx.strokeStyle = '#654321';
+              ctx.lineWidth = 2;
+              ctx.shadowColor = '#8B7355';
+              ctx.shadowBlur = 15;
+              
+              ctx.translate(currentX, currentY);
+              ctx.rotate(boulderRotation);
+              
+              // Boulder shape (irregular circle)
+              ctx.beginPath();
+              for (let i = 0; i < 8; i++) {
+                const angle = (i * Math.PI * 2) / 8;
+                const radius = 12 + Math.sin(i * 2) * 3;
+                const x = Math.cos(angle) * radius;
+                const y = Math.sin(angle) * radius;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+              }
+              ctx.closePath();
+              ctx.fill();
+              ctx.stroke();
+              
+              ctx.resetTransform();              // Trajectory arc particles
+              for (let i = 0; i < 8; i++) {
+                const trailProgress = progress - i * 0.08;
+                if (trailProgress > 0) {
+                  const trailX = anim.fromX + (anim.toX - anim.fromX) * trailProgress;
+                  const trailYPos = anim.fromY + (anim.toY - anim.fromY) * trailProgress - 40 * Math.sin(trailProgress * Math.PI);
+                  
+                  ctx.fillStyle = `rgba(139, 115, 85, ${(1 - i * 0.12) * 0.6})`;
+                  ctx.beginPath();
+                  ctx.arc(trailX, trailYPos, 3 - i * 0.3, 0, Math.PI * 2);
+                  ctx.fill();
+                }
+              }
+              
+              // AOE impact preview (near target)
+              if (progress > 0.7) {
+                const aoeAlpha = (progress - 0.7) / 0.3;
+                ctx.strokeStyle = `rgba(255, 100, 0, ${aoeAlpha * 0.5})`;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.beginPath();
+                ctx.arc(anim.toX, anim.toY, 60, 0, Math.PI * 2); // AOE radius indicator
+                ctx.stroke();
+                ctx.setLineDash([]);
+              }
+              
+              ctx.restore();
+              
+            } else if (anim.type === 'base_lightning') {
+              // Enhanced castle lightning attack
+              ctx.save();
+              
+              const adjustedTime = now;
+              
+              // Enhanced lightning bolt function for base attacks
+              const drawEnhancedBaseLightning = (fromX: number, fromY: number, toX: number, toY: number, intensity: number = 1) => {
+                const segments = 15;
+                const points = [];
+                const maxOffset = 25 * intensity;
+                
+                // Create main lightning path with more dramatic zigzag
+                for (let i = 0; i <= segments; i++) {
+                  const t = i / segments;
+                  const baseX = fromX + (toX - fromX) * t;
+                  const baseY = fromY + (toY - fromY) * t;
+                  
+                  // Enhanced zigzag with multiple frequency components
+                  const offsetX = (
+                    Math.sin(adjustedTime * 0.02 + i * 1.2) * maxOffset * (1 - Math.abs(t - 0.5) * 1.2) +
+                    Math.sin(adjustedTime * 0.04 + i * 1.8) * maxOffset * 0.4
+                  );
+                  const offsetY = (
+                    Math.cos(adjustedTime * 0.018 + i * 1.1) * maxOffset * (1 - Math.abs(t - 0.5) * 1.2) +
+                    Math.cos(adjustedTime * 0.035 + i * 1.6) * maxOffset * 0.4
+                  );
+                  
+                  points.push({ x: baseX + offsetX, y: baseY + offsetY });
+                }
+                
+                return points;
+              };
+
+              const lightningPoints = drawEnhancedBaseLightning(anim.fromX, anim.fromY, anim.toX, anim.toY);
+              
+              // Draw multiple lightning layers with enhanced effects
+              for (let stroke = 0; stroke < 6; stroke++) {
+                ctx.save();
+                
+                const strokeIntensity = Math.sin(adjustedTime * 0.04 + stroke) * 0.3 + 0.7;
+                
+                if (stroke === 0) {
+                  // Core white lightning
+                  ctx.strokeStyle = '#FFFFFF';
+                  ctx.lineWidth = 8;
+                  ctx.shadowColor = '#FFFFFF';
+                  ctx.shadowBlur = 30;
+                  ctx.globalAlpha = strokeIntensity;
+                } else if (stroke === 1) {
+                  // Bright cyan layer
+                  ctx.strokeStyle = '#00FFFF';
+                  ctx.lineWidth = 6;
+                  ctx.shadowColor = '#00FFFF';
+                  ctx.shadowBlur = 25;
+                  ctx.globalAlpha = strokeIntensity * 0.8;
+                } else if (stroke === 2) {
+                  // Electric blue layer
+                  ctx.strokeStyle = '#0088FF';
+                  ctx.lineWidth = 4;
+                  ctx.shadowColor = '#0088FF';
+                  ctx.shadowBlur = 20;
+                  ctx.globalAlpha = strokeIntensity * 0.6;
+                } else {
+                  // Outer glow layers
+                  ctx.strokeStyle = '#CCDDFF';
+                  ctx.lineWidth = 10 - stroke;
+                  ctx.shadowColor = '#CCDDFF';
+                  ctx.shadowBlur = 50;
+                  ctx.globalAlpha = strokeIntensity * 0.3;
+                }
+                
+                ctx.beginPath();
+                lightningPoints.forEach((point, i) => {
+                  if (i === 0) {
+                    ctx.moveTo(point.x, point.y);
+                  } else {
+                    ctx.lineTo(point.x, point.y);
+                  }
+                });
+                ctx.stroke();
+                
+                ctx.restore();
+              }
+              
+              // Add branching lightning bolts for dramatic effect
+              if (Math.random() < 0.4) {
+                const midPoint = lightningPoints[Math.floor(lightningPoints.length / 2)];
+                const branchAngle = Math.random() * Math.PI * 2;
+                const branchLength = 40 + Math.random() * 60;
+                const branchEndX = midPoint.x + Math.cos(branchAngle) * branchLength;
+                const branchEndY = midPoint.y + Math.sin(branchAngle) * branchLength;
+                
+                const branchPoints = drawEnhancedBaseLightning(midPoint.x, midPoint.y, branchEndX, branchEndY, 0.6);
+                
+                ctx.save();
+                ctx.strokeStyle = '#00FFFF';
+                ctx.lineWidth = 3;
+                ctx.shadowColor = '#00FFFF';
+                ctx.shadowBlur = 20;
+                ctx.globalAlpha = 0.7;
+                
+                ctx.beginPath();
+                branchPoints.forEach((point, i) => {
+                  if (i === 0) {
+                    ctx.moveTo(point.x, point.y);
+                  } else {
+                    ctx.lineTo(point.x, point.y);
+                  }
+                });
+                ctx.stroke();
+                ctx.restore();
+              }
+              
+              // Enhanced electrical impact at target
+              ctx.save();
+              const impactIntensity = Math.sin(adjustedTime * 0.05) * 0.5 + 0.5;
+              
+              // Shockwave rings
+              for (let ring = 0; ring < 4; ring++) {
+                const ringRadius = (15 + ring * 12) * (1 + impactIntensity * 0.5);
+                ctx.strokeStyle = `rgba(0, 255, 255, ${(0.8 - ring * 0.15) * impactIntensity})`;
+                ctx.lineWidth = 6 - ring;
+                ctx.shadowColor = '#00FFFF';
+                ctx.shadowBlur = 25;
+                
+                ctx.beginPath();
+                ctx.arc(anim.toX, anim.toY, ringRadius, 0, Math.PI * 2);
+                ctx.stroke();
+              }
+              
+              // Electrical particle burst
+              for (let particle = 0; particle < 16; particle++) {
+                const particleAngle = (adjustedTime * 0.03 + particle * Math.PI / 8) % (Math.PI * 2);
+                const particleDistance = 20 + Math.sin(adjustedTime * 0.03 + particle) * 15;
+                const particleX = anim.toX + Math.cos(particleAngle) * particleDistance;
+                const particleY = anim.toY + Math.sin(particleAngle) * particleDistance;
+                const particleSize = 1.5 + Math.sin(adjustedTime * 0.04 + particle) * 2;
+                
+                ctx.fillStyle = particle % 2 === 0 ? '#FFFFFF' : '#00FFFF';
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.shadowBlur = 12;
+                
+                ctx.beginPath();
+                ctx.arc(particleX, particleY, particleSize, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              
+              // Lightning impact flash
+              const flashIntensity = Math.max(0, Math.sin(adjustedTime * 0.12) * 0.4);
+              if (flashIntensity > 0) {
+                const flashGradient = ctx.createRadialGradient(anim.toX, anim.toY, 0, anim.toX, anim.toY, 50);
+                flashGradient.addColorStop(0, `rgba(255, 255, 255, ${flashIntensity})`);
+                flashGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                
+                ctx.fillStyle = flashGradient;
+                ctx.beginPath();
+                ctx.arc(anim.toX, anim.toY, 50, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              
+              ctx.restore();
+              
+            } else if (anim.type === 'base_chain_lightning') {
+              // Chain lightning from castle wizard weapon
+              ctx.save();
+              
+              const adjustedTime = now;
+              
+              // Create animated chain lightning path with more chaotic movement
+              const segments = 10;
+              const points = [];
+              const maxOffset = 20;
+              
+              for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const baseX = anim.fromX + (anim.toX - anim.fromX) * t;
+                const baseY = anim.fromY + (anim.toY - anim.fromY) * t;
+                
+                // More chaotic zigzag for chain lightning
+                const offsetX = (
+                  Math.sin(adjustedTime * 0.03 + i * 1.5) * maxOffset * (1 - Math.abs(t - 0.5) * 1.3) +
+                  Math.sin(adjustedTime * 0.06 + i * 2.2) * maxOffset * 0.5
+                );
+                const offsetY = (
+                  Math.cos(adjustedTime * 0.025 + i * 1.4) * maxOffset * (1 - Math.abs(t - 0.5) * 1.3) +
+                  Math.cos(adjustedTime * 0.055 + i * 2.0) * maxOffset * 0.5
+                );
+                
+                points.push({ x: baseX + offsetX, y: baseY + offsetY });
+              }
+              
+              // Draw chain lightning with diminished intensity
+              for (let stroke = 0; stroke < 4; stroke++) {
+                ctx.save();
+                
+                const strokeIntensity = (Math.sin(adjustedTime * 0.05 + stroke) * 0.3 + 0.7) * 0.7; // Reduced intensity for chain
+                
+                if (stroke === 0) {
+                  ctx.strokeStyle = '#FFFFFF';
+                  ctx.lineWidth = 5;
+                  ctx.shadowColor = '#FFFFFF';
+                  ctx.shadowBlur = 20;
+                  ctx.globalAlpha = strokeIntensity;
+                } else if (stroke === 1) {
+                  ctx.strokeStyle = '#88FFFF';
+                  ctx.lineWidth = 4;
+                  ctx.shadowColor = '#88FFFF';
+                  ctx.shadowBlur = 16;
+                  ctx.globalAlpha = strokeIntensity * 0.8;
+                } else {
+                  ctx.strokeStyle = '#CCFFFF';
+                  ctx.lineWidth = 6 - stroke;
+                  ctx.shadowColor = '#CCFFFF';
+                  ctx.shadowBlur = 30;
+                  ctx.globalAlpha = strokeIntensity * 0.4;
+                }
+                
+                ctx.beginPath();
+                points.forEach((point, i) => {
+                  if (i === 0) {
+                    ctx.moveTo(point.x, point.y);
+                  } else {
+                    ctx.lineTo(point.x, point.y);
+                  }
+                });
+                ctx.stroke();
+                
+                ctx.restore();
+              }
+              
+              // Chain impact effect (smaller than main lightning)
+              ctx.save();
+              const chainImpact = Math.sin(adjustedTime * 0.06) * 0.3 + 0.4;
+              
+              // Smaller shockwave rings
+              for (let ring = 0; ring < 2; ring++) {
+                const ringRadius = (8 + ring * 8) * (1 + chainImpact * 0.3);
+                ctx.strokeStyle = `rgba(136, 255, 255, ${0.6 - ring * 0.2})`;
+                ctx.lineWidth = 3 - ring;
+                ctx.shadowColor = '#88FFFF';
+                ctx.shadowBlur = 15;
+                
+                ctx.beginPath();
+                ctx.arc(anim.toX, anim.toY, ringRadius, 0, Math.PI * 2);
+                ctx.stroke();
+              }
+              
+              // Chain electrical particles
+              for (let particle = 0; particle < 8; particle++) {
+                const particleAngle = (adjustedTime * 0.04 + particle * Math.PI / 4) % (Math.PI * 2);
+                const particleDistance = 10 + Math.sin(adjustedTime * 0.04 + particle) * 8;
+                const particleX = anim.toX + Math.cos(particleAngle) * particleDistance;
+                const particleY = anim.toY + Math.sin(particleAngle) * particleDistance;
+                const particleSize = 1 + Math.sin(adjustedTime * 0.05 + particle) * 1.5;
+                
+                ctx.fillStyle = particle % 2 === 0 ? '#CCFFFF' : '#88FFFF';
+                ctx.shadowColor = ctx.fillStyle;
+                ctx.shadowBlur = 8;
+                
+                ctx.beginPath();
+                ctx.arc(particleX, particleY, particleSize, 0, Math.PI * 2);
+                ctx.fill();
+              }
               
               ctx.restore();
             }
@@ -1178,19 +1865,22 @@ function App() {
               ctx.stroke();
               ctx.globalAlpha = 1.0;
               ctx.restore();
-            }
-
-            // Draw trap as a spiky circle
+            }            // Draw enhanced trap with level-based appearance
             ctx.save();
-            ctx.fillStyle = player.color;
-            ctx.strokeStyle = '#444';
-            ctx.lineWidth = 2;
+            const trapLevel = trap.level || 1;
             
-            // Draw spiky trap shape
+            // Base color gets more intense with level
+            const baseColor = player.color;
+            const intensity = Math.min(1, 0.6 + (trapLevel * 0.15));
+            ctx.fillStyle = adjustColorIntensity(baseColor, intensity);
+            ctx.strokeStyle = trapLevel >= 2 ? '#FF0000' : '#444';
+            ctx.lineWidth = 2 + (trapLevel * 0.5);
+            
+            // Draw enhanced spiky trap shape with level-based size
             ctx.beginPath();
-            const spikes = 8;
-            const outerRadius = 12;
-            const innerRadius = 6;
+            const spikes = 8 + (trapLevel * 2); // More spikes at higher levels
+            const outerRadius = 12 + (trapLevel * 3); // Larger size
+            const innerRadius = 6 + (trapLevel * 1.5);
             
             for (let i = 0; i < spikes * 2; i++) {
               const angle = (i * Math.PI) / spikes;
@@ -1209,11 +1899,40 @@ function App() {
             ctx.fill();
             ctx.stroke();
             
-            // Add a danger symbol in the center
-            ctx.fillStyle = '#FFD700';
-            ctx.font = '12px Arial';
+            // Add level indicator above trap
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px Arial';
             ctx.textAlign = 'center';
+            ctx.fillText(`L${trapLevel}`, trap.x, trap.y - outerRadius - 8);
+            
+            // Add enhanced danger symbol in center
+            ctx.fillStyle = trapLevel >= 3 ? '#FFD700' : '#FF0000';
+            ctx.font = `${10 + trapLevel * 2}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 2;
             ctx.fillText('!', trap.x, trap.y + 4);
+            
+            // Add decorative elements for high levels
+            if (trapLevel >= 2) {
+              ctx.strokeStyle = '#FF8C00'; // Orange accent
+              ctx.lineWidth = 1;
+              ctx.beginPath();
+              ctx.arc(trap.x, trap.y, outerRadius + 2, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            
+            if (trapLevel >= 3) {
+              // Add energy glow effect for max level
+              const now = Date.now();
+              ctx.strokeStyle = '#FF0000';
+              ctx.lineWidth = 1;
+              ctx.globalAlpha = 0.5 + Math.sin(now * 0.01) * 0.3;
+              ctx.beginPath();
+              ctx.arc(trap.x, trap.y, outerRadius + 5, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+            }
             
             ctx.restore();
           }
@@ -1240,19 +1959,56 @@ function App() {
             ctx.stroke();
             ctx.globalAlpha = 1.0;
             ctx.restore();
-          }
-
-          // Draw turret body (rectangular base)
+          }          // Draw turret body (rectangular base) - enhanced appearance based on level
           ctx.save();
-          ctx.fillStyle = player.color;
-          ctx.strokeStyle = '#000';
-          ctx.lineWidth = 2;
-          ctx.fillRect(turret.x - 15, turret.y - 15, 30, 30);
-          ctx.strokeRect(turret.x - 15, turret.y - 15, 30, 30);
+          const turretLevel = turret.level || 1;
           
-          // Draw turret cannon
-          ctx.fillStyle = '#666';
-          ctx.fillRect(turret.x - 3, turret.y - 20, 6, 25);
+          // Base color gets more intense with level
+          const baseColor = player.color;
+          const intensity = Math.min(1, 0.6 + (turretLevel * 0.1));
+          ctx.fillStyle = adjustColorIntensity(baseColor, intensity);
+          ctx.strokeStyle = '#000';
+          ctx.lineWidth = 2 + (turretLevel * 0.5); // Thicker outline for higher levels
+          
+          // Size increases with upgrades
+          const baseSize = 15 + (turretLevel * 3);
+          ctx.fillRect(turret.x - baseSize, turret.y - baseSize, baseSize * 2, baseSize * 2);
+          ctx.strokeRect(turret.x - baseSize, turret.y - baseSize, baseSize * 2, baseSize * 2);
+          
+          // Draw multiple cannons for higher levels
+          ctx.fillStyle = '#333';
+          for (let i = 0; i < turretLevel; i++) {
+            const offsetX = (i - (turretLevel - 1) / 2) * 8;
+            const cannonWidth = 4 + turretLevel;
+            const cannonHeight = 20 + (turretLevel * 3);
+            ctx.fillRect(turret.x + offsetX - cannonWidth/2, turret.y - cannonHeight, cannonWidth, cannonHeight + 5);
+          }
+          
+          // Add level indicator
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px Arial';
+          ctx.textAlign = 'center';
+          ctx.fillText(`L${turretLevel}`, turret.x, turret.y - baseSize - 8);
+          
+          // Add decorative elements for high levels
+          if (turretLevel >= 3) {
+            ctx.strokeStyle = '#FFD700'; // Gold accent
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(turret.x, turret.y, baseSize + 2, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          
+          if (turretLevel >= 5) {
+            // Add energy glow effect for max level
+            ctx.strokeStyle = '#00FFFF';
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.arc(turret.x, turret.y, baseSize + 5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+          }
           
           // Draw attack range circle (semi-transparent)
           ctx.strokeStyle = player.color;
@@ -1308,34 +2064,73 @@ function App() {
               ctx.stroke();
               ctx.globalAlpha = 1.0;
               ctx.restore();
-            }
-
-            // Draw mine as a circular shape with warning pattern
+            }            // Draw enhanced mine with level-based appearance
             ctx.save();
-            ctx.fillStyle = player.color;
-            ctx.strokeStyle = '#FFD700';
-            ctx.lineWidth = 2;
+            const mineLevel = mine.level || 1;
             
-            // Draw mine circle
+            // Base color gets more intense with level
+            const baseColor = player.color;
+            const intensity = Math.min(1, 0.6 + (mineLevel * 0.15));
+            ctx.fillStyle = adjustColorIntensity(baseColor, intensity);
+            ctx.strokeStyle = mineLevel >= 2 ? '#FFD700' : '#FFD700';
+            ctx.lineWidth = 2 + (mineLevel * 0.5);
+            
+            // Draw enhanced mine with level-based size
+            const mineRadius = 10 + (mineLevel * 2);
             ctx.beginPath();
-            ctx.arc(mine.x, mine.y, 10, 0, Math.PI * 2);
+            ctx.arc(mine.x, mine.y, mineRadius, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
             
-            // Draw explosion radius indicator (very faint)
+            // Add spikes/protrusions for higher levels
+            if (mineLevel >= 2) {
+              ctx.fillStyle = '#FFD700';
+              for (let spike = 0; spike < 6; spike++) {
+                const spikeAngle = (spike * Math.PI) / 3;
+                const spikeX = mine.x + Math.cos(spikeAngle) * (mineRadius + 3);
+                const spikeY = mine.y + Math.sin(spikeAngle) * (mineRadius + 3);
+                
+                ctx.beginPath();
+                ctx.arc(spikeX, spikeY, 2, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+            
+            // Add level indicator above mine
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 10px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`L${mineLevel}`, mine.x, mine.y - mineRadius - 8);
+            
+            // Draw enhanced explosion radius indicator (very faint)
             ctx.strokeStyle = '#FF0000';
             ctx.lineWidth = 1;
-            ctx.globalAlpha = 0.05;
+            ctx.globalAlpha = 0.05 + (mineLevel * 0.02);
             ctx.beginPath();
             ctx.arc(mine.x, mine.y, mine.explosionRadius, 0, Math.PI * 2);
             ctx.stroke();
             ctx.globalAlpha = 1.0;
             
-            // Add warning symbol
-            ctx.fillStyle = '#FFD700';
-            ctx.font = '10px Arial';
+            // Add enhanced warning symbol
+            ctx.fillStyle = mineLevel >= 3 ? '#FF0000' : '#FFD700';
+            ctx.font = `${8 + mineLevel * 2}px Arial`;
             ctx.textAlign = 'center';
+            ctx.shadowColor = '#000';
+            ctx.shadowBlur = 2;
             ctx.fillText('M', mine.x, mine.y + 3);
+            
+            // Add decorative elements for high levels
+            if (mineLevel >= 3) {
+              // Add pulsing danger glow for max level
+              const now = Date.now();
+              ctx.strokeStyle = '#FF0000';
+              ctx.lineWidth = 2;
+              ctx.globalAlpha = 0.3 + Math.sin(now * 0.015) * 0.4;
+              ctx.beginPath();
+              ctx.arc(mine.x, mine.y, mineRadius + 6, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+            }
             
             ctx.restore();
           }
@@ -1630,12 +2425,15 @@ function App() {
           }
         });
       }
-      
-      // Restore the scaling transformation
+        // Restore the scaling transformation
       ctx.restore();
     } catch (err) {
       console.error('Canvas rendering error:', err);
     }
+    };
+
+    // Start the render loop
+    requestAnimationFrame(render);
   }, [gameState, canvasSize]); // Re-render whenever gameState or canvas size changes
 
   const joinGame = () => {
@@ -1675,17 +2473,11 @@ function App() {
       attackRange: (base as any).attackRange || 120
     };
   };
-
   const getProduction = (): number => {
     if (!gameState || playerIndex < 0) return 0;
-    // Calculate production based on peasants or other factors
-    const myUnits = gameState.units.filter(unit => unit.playerId === gameState.players[playerIndex]?.id);
-    const peasants = myUnits.filter(unit => unit.unitType === 'Peasant');
-    return peasants.length * 2; // 2 resources per peasant per second
+    // Use the server's resourceGenerationRate instead of peasant count
+    return gameState.resourceGenerationRate || 10;
   };
-
-  // Constants for lanes
-  const LANES = [0, 1, 2, 3, 4];
 
   const spawnUnit = (unitType: string) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
@@ -1817,6 +2609,12 @@ function App() {
     return gameState.playerResources[gameState.players[playerIndex].id] || 0;
   };
 
+  const changeCastleWeapon = (weaponType: string) => {
+    if (socket && gameId) {
+      socket.emit('change-castle-weapon', { gameId, weaponType });
+    }
+  };
+
   const upgradeCastle = () => {
     if (socket && gameId) {
       socket.emit('upgrade-castle', { gameId });
@@ -1834,16 +2632,38 @@ function App() {
       socket.emit('upgrade-trap', { gameId, trapId });
     }
   };
-
   const upgradeMine = (mineId: string) => {
     if (socket && gameId) {
       socket.emit('upgrade-mine', { gameId, mineId });
     }
   };
 
-  const changeCastleWeapon = (weaponType: 'basic' | 'trebuchet' | 'wizard' | 'arrows') => {
-    if (socket && gameId) {
-      socket.emit('change-castle-weapon', { gameId, weaponType });
+  const purchasePowerup = (unitType: string, powerupName: string, cost: number) => {
+    if (socket && gameId && gameState && playerIndex >= 0) {
+      const myResources = getMyResources();
+      if (myResources >= cost && !isPowerupPurchased(unitType, powerupName)) {
+        socket.emit('purchase-powerup', { 
+          gameId, 
+          unitType, 
+          powerupName, 
+          cost 
+        });
+      }
+    }
+  };
+  const isPowerupPurchased = (unitType: string, powerupName: string): boolean => {
+    if (!gameState || playerIndex < 0) return false;
+    const playerId = gameState.players[playerIndex].id;
+    const playerPowerups = gameState.playerPowerups?.[playerId];
+    return playerPowerups && playerPowerups[unitType] && playerPowerups[unitType][powerupName] || false;
+  };
+
+  const handleGamble = () => {
+    if (socket && gameId && gameState && playerIndex >= 0) {
+      const myResources = getMyResources();
+      if (myResources >= 1000) {
+        socket.emit('gamble', { gameId });
+      }
     }
   };
 
@@ -1877,8 +2697,7 @@ function App() {
           }
         }}
       />
-      
-      {/* Minimize/Maximize Button - only show when in game */}
+        {/* Minimize/Maximize Button - only show when in game */}
       {gameState && (
         <button 
           className="minimize-button" 
@@ -1886,6 +2705,18 @@ function App() {
           title={isMinimized ? "Maximize Game" : "Minimize Game"}
         >
           {isMinimized ? '⬆️' : '⬇️'}
+        </button>
+      )}
+      
+      {/* Gamble Button - only show when in game and not game over */}
+      {gameState && !gameState.gameOver && (
+        <button 
+          className="gamble-button" 
+          onClick={handleGamble}
+          disabled={getMyResources() < 1000}
+          title="Gamble 1000 coins for a 1/10000 chance to win the game!"
+        >
+          🎰 Gamble (1000)
         </button>
       )}
       {/* Main game UI overlayed above Plinko */}
@@ -1953,8 +2784,7 @@ function App() {
               )}
             </div>            
             {gameState.players.length === 2 && !gameState.gameOver && (
-              <div className="control-panel-compact">
-                <div className="tab-navigation-compact">
+              <div className="control-panel-compact">                <div className="tab-navigation-compact">
                   <button 
                     className={`tab-btn-compact ${activeTab === 'units' ? 'active' : ''}`}
                     onClick={() => setActiveTab('units')}
@@ -1972,6 +2802,12 @@ function App() {
                     onClick={() => setActiveTab('castle')}
                   >
                     🏰
+                  </button>
+                  <button 
+                    className={`tab-btn-compact ${activeTab === 'upgrades' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('upgrades')}
+                  >
+                    ⬆️
                   </button>
                   <button 
                     className={`tab-btn-compact ${activeTab === 'info' ? 'active' : ''}`}
@@ -2104,16 +2940,22 @@ function App() {
                         </div>
                       </div>
                       
-                      {/* Upgrade sections */}
-                      {selectedTurret && (
+                      {/* Upgrade sections */}                      {selectedTurret && (
                         <div className="upgrade-section-compact">
-                          <div className="upgrade-title-compact">🗼 Selected Turret</div>
-                          <div className="upgrade-actions-compact">
-                            <button
+                          <div className="upgrade-title-compact">🗼 Selected Turret (L{gameState.turrets.find(t => t.id === selectedTurret)?.level || 1})</div>
+                          <div className="upgrade-actions-compact">                            <button
                               className="upgrade-btn-compact"
                               onClick={() => upgradeTurret(selectedTurret)}
+                              disabled={
+                                !gameState.turrets.find(t => t.id === selectedTurret) ||
+                                (gameState.turrets.find(t => t.id === selectedTurret)?.level || 1) >= 5 ||
+                                getMyResources() < (150 * (gameState.turrets.find(t => t.id === selectedTurret)?.level || 1))
+                              }
                             >
-                              ⬆️ Upgrade
+                              {(gameState.turrets.find(t => t.id === selectedTurret)?.level || 1) >= 5 ? 
+                                '🏆 Maxed Out' : 
+                                `⬆️ Upgrade (${150 * (gameState.turrets.find(t => t.id === selectedTurret)?.level || 1)})`
+                              }
                             </button>
                             <button
                               className="deselect-btn-compact"
@@ -2127,13 +2969,20 @@ function App() {
 
                       {selectedTrap && (
                         <div className="upgrade-section-compact">
-                          <div className="upgrade-title-compact">🕳️ Selected Trap</div>
-                          <div className="upgrade-actions-compact">
-                            <button
+                          <div className="upgrade-title-compact">🕳️ Selected Trap (L{gameState.traps.find(t => t.id === selectedTrap)?.level || 1})</div>
+                          <div className="upgrade-actions-compact">                            <button
                               className="upgrade-btn-compact"
                               onClick={() => upgradeTrap(selectedTrap)}
+                              disabled={
+                                !gameState.traps.find(t => t.id === selectedTrap) ||
+                                (gameState.traps.find(t => t.id === selectedTrap)?.level || 1) >= 3 ||
+                                getMyResources() < (100 * (gameState.traps.find(t => t.id === selectedTrap)?.level || 1))
+                              }
                             >
-                              ⬆️ Upgrade
+                              {(gameState.traps.find(t => t.id === selectedTrap)?.level || 1) >= 3 ? 
+                                '🏆 Maxed Out' : 
+                                `⬆️ Upgrade (${100 * (gameState.traps.find(t => t.id === selectedTrap)?.level || 1)})`
+                              }
                             </button>
                             <button
                               className="deselect-btn-compact"
@@ -2147,13 +2996,20 @@ function App() {
 
                       {selectedMine && (
                         <div className="upgrade-section-compact">
-                          <div className="upgrade-title-compact">💣 Selected Mine</div>
-                          <div className="upgrade-actions-compact">
-                            <button
+                          <div className="upgrade-title-compact">💣 Selected Mine (L{gameState.mines.find(m => m.id === selectedMine)?.level || 1})</div>
+                          <div className="upgrade-actions-compact">                            <button
                               className="upgrade-btn-compact"
                               onClick={() => upgradeMine(selectedMine)}
+                              disabled={
+                                !gameState.mines.find(m => m.id === selectedMine) ||
+                                (gameState.mines.find(m => m.id === selectedMine)?.level || 1) >= 3 ||
+                                getMyResources() < (125 * (gameState.mines.find(m => m.id === selectedMine)?.level || 1))
+                              }
                             >
-                              ⬆️ Upgrade
+                              {(gameState.mines.find(m => m.id === selectedMine)?.level || 1) >= 3 ? 
+                                '🏆 Maxed Out' : 
+                                `⬆️ Upgrade (${125 * (gameState.mines.find(m => m.id === selectedMine)?.level || 1)})`
+                              }
                             </button>
                             <button
                               className="deselect-btn-compact"
@@ -2178,48 +3034,45 @@ function App() {
                           <div className="castle-stat-compact">🛡️ {getMyBaseHealth().weaponType}</div>
                         </div>
                       </div>
-                      
-                      <div className="castle-upgrade-compact">
+                        <div className="castle-upgrade-compact">
                         <button
                           className="castle-upgrade-btn-compact"
                           onClick={upgradeCastle}
-                          disabled={getMyBaseHealth().level >= 5 || getMyResources() < (getMyBaseHealth().level || 1) * 200}
+                          disabled={getMyBaseHealth().level >= 5 || getMyResources() < (getMyBaseHealth().level || 1) * 400}
                         >
-                          {getMyBaseHealth().level >= 5 ? '🏆 Max Level' : `⬆️ Upgrade (${(getMyBaseHealth().level || 1) * 200})`}
+                          {getMyBaseHealth().level >= 5 ? '🏆 Max Level' : `⬆️ Upgrade (${(getMyBaseHealth().level || 1) * 400})`}
                         </button>
                       </div>
-                      
-                      <div className="weapon-selection-compact">
+                          <div className="weapon-selection-compact">
                         <div className="weapon-title-compact">🗡️ Weapons</div>
                         <div className="weapon-buttons-compact">
                           <button
                             className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'basic' ? 'selected' : ''}`}
                             onClick={() => changeCastleWeapon('basic')}
                           >
-                            🏹 Basic
+                            🏹 Basic (Free)
                           </button>
                           <button
                             className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'arrows' ? 'selected' : ''}`}
                             onClick={() => changeCastleWeapon('arrows')}
-                            disabled={getMyBaseHealth().level < 2}
+                            disabled={getMyBaseHealth().level < 2 || (getMyBaseHealth().weaponType !== 'arrows' && getMyResources() < 150)}
                           >
-                            🏹 Multi
+                            🏹 Multi (150)
                           </button>
                           <button
                             className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'trebuchet' ? 'selected' : ''}`}
                             onClick={() => changeCastleWeapon('trebuchet')}
-                            disabled={getMyBaseHealth().level < 3}
+                            disabled={getMyBaseHealth().level < 3 || (getMyBaseHealth().weaponType !== 'trebuchet' && getMyResources() < 300)}
                           >
-                            🏰 Trebuchet
+                            🏰 Trebuchet (300)
                           </button>
                           <button
                             className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'wizard' ? 'selected' : ''}`}
                             onClick={() => changeCastleWeapon('wizard')}
-                            disabled={getMyBaseHealth().level < 4}
+                            disabled={getMyBaseHealth().level < 4 || (getMyBaseHealth().weaponType !== 'wizard' && getMyResources() < 500)}
                           >
-                            🔮 Magic
-                          </button>
-                        </div>
+                            🔮 Magic (500)
+                          </button>                        </div>
                       </div>
                     </div>
                   )}
@@ -2240,6 +3093,169 @@ function App() {
                         <h4>Stats</h4>
                         <div>Production: {getProduction()}/s</div>
                         <div>Units: {gameState.units.filter(u => u.playerId === gameState.players[playerIndex]?.id).length}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'upgrades' && (
+                    <div className="upgrades-tab-compact">
+                      <div className="upgrade-section-compact">
+                        <h4>Unit Upgrades</h4>
+                        
+                        <div className="upgrade-category-compact">
+                          <h5>⚒️ Peasant Upgrades</h5>
+                          <div className="upgrade-item-compact">
+                            <span>Enhanced Tools</span>
+                            <span className="upgrade-cost-compact">150 💰</span>                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('peasant', 'enhancedTools', 150)}
+                              disabled={isPowerupPurchased('peasant', 'enhancedTools') || getMyResources() < 150}
+                            >
+                              {isPowerupPurchased('peasant', 'enhancedTools') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +50% damage, +25% speed
+                          </div>
+                            <div className="upgrade-item-compact">
+                            <span>Hardy Workers</span>
+                            <span className="upgrade-cost-compact">200 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('peasant', 'hardyWorkers', 200)}
+                              disabled={isPowerupPurchased('peasant', 'hardyWorkers') || getMyResources() < 200}
+                            >
+                              {isPowerupPurchased('peasant', 'hardyWorkers') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +100% health
+                          </div>
+                        </div>
+
+                        <div className="upgrade-category-compact">
+                          <h5>⚔️ Knight Upgrades</h5>                          <div className="upgrade-item-compact">
+                            <span>Master Armor</span>
+                            <span className="upgrade-cost-compact">300 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('knight', 'masterArmor', 300)}
+                              disabled={isPowerupPurchased('knight', 'masterArmor') || getMyResources() < 300}
+                            >
+                              {isPowerupPurchased('knight', 'masterArmor') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            -35% incoming damage
+                          </div>
+                            <div className="upgrade-item-compact">
+                            <span>Battle Charge</span>
+                            <span className="upgrade-cost-compact">400 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('knight', 'battleCharge', 400)}
+                              disabled={isPowerupPurchased('knight', 'battleCharge') || getMyResources() < 400}
+                            >
+                              {isPowerupPurchased('knight', 'battleCharge') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +100% damage when below 50% health
+                          </div>
+                        </div>
+
+                        <div className="upgrade-category-compact">
+                          <h5>🏹 Archer Upgrades</h5>                          <div className="upgrade-item-compact">
+                            <span>Eagle Eye</span>
+                            <span className="upgrade-cost-compact">350 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('archer', 'eagleEye', 350)}
+                              disabled={isPowerupPurchased('archer', 'eagleEye') || getMyResources() < 350}
+                            >
+                              {isPowerupPurchased('archer', 'eagleEye') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +25% critical hit chance
+                          </div>
+                            <div className="upgrade-item-compact">
+                            <span>Piercing Shots</span>
+                            <span className="upgrade-cost-compact">450 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('archer', 'piercingShots', 450)}
+                              disabled={isPowerupPurchased('archer', 'piercingShots') || getMyResources() < 450}
+                            >
+                              {isPowerupPurchased('archer', 'piercingShots') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            Arrows pierce through enemies
+                          </div>
+                        </div>
+
+                        <div className="upgrade-category-compact">
+                          <h5>👑 King Upgrades</h5>                          <div className="upgrade-item-compact">
+                            <span>Royal Authority</span>
+                            <span className="upgrade-cost-compact">500 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('king', 'royalAuthority', 500)}
+                              disabled={isPowerupPurchased('king', 'royalAuthority') || getMyResources() < 500}
+                            >
+                              {isPowerupPurchased('king', 'royalAuthority') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +50% aura damage bonus, +50% aura range
+                          </div>
+                            <div className="upgrade-item-compact">
+                            <span>Divine Protection</span>
+                            <span className="upgrade-cost-compact">600 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('king', 'divineProtection', 600)}
+                              disabled={isPowerupPurchased('king', 'divineProtection') || getMyResources() < 600}
+                            >
+                              {isPowerupPurchased('king', 'divineProtection') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            Immune to crits, health regeneration
+                          </div>
+                        </div>
+
+                        <div className="upgrade-category-compact">
+                          <h5>🔮 Wizard Upgrades</h5>                          <div className="upgrade-item-compact">
+                            <span>Arc Lightning</span>
+                            <span className="upgrade-cost-compact">400 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('wizard', 'arcLightning', 400)}
+                              disabled={isPowerupPurchased('wizard', 'arcLightning') || getMyResources() < 400}
+                            >
+                              {isPowerupPurchased('wizard', 'arcLightning') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            +2 chain targets, +50% chain range
+                          </div>
+                            <div className="upgrade-item-compact">
+                            <span>Mana Shield</span>
+                            <span className="upgrade-cost-compact">550 💰</span>
+                            <button 
+                              className="upgrade-btn-compact" 
+                              onClick={() => purchasePowerup('wizard', 'manaShield', 550)}
+                              disabled={isPowerupPurchased('wizard', 'manaShield') || getMyResources() < 550}
+                            >
+                              {isPowerupPurchased('wizard', 'manaShield') ? '✅' : 'Buy'}
+                            </button>
+                          </div>
+                          <div className="upgrade-description-compact">
+                            -40% damage taken, 25% damage reflection
+                          </div>
+                        </div>
                       </div>
                     </div>
                   )}

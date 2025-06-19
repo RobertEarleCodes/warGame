@@ -1730,6 +1730,71 @@ h2 {
   }
 }
 
+/* Gamble button styling */
+.gamble-button {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  background: linear-gradient(135deg, #ff6b6b, #ff8e8e);
+  border: 2px solid rgba(255, 107, 107, 0.7);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 25px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  z-index: 1001;
+  box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
+  transition: all 0.3s ease;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.gamble-button:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(255, 107, 107, 0.8);
+  background: linear-gradient(135deg, #ff5252, #ff7777);
+}
+
+.gamble-button:disabled {
+  background: linear-gradient(135deg, #6c757d, #868e96);
+  border-color: rgba(108, 117, 125, 0.7);
+  cursor: not-allowed;
+  opacity: 0.6;
+  box-shadow: 0 0 10px rgba(108, 117, 125, 0.3);
+}
+
+.gamble-button::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  right: -4px;
+  bottom: -4px;
+  border-radius: 25px;
+  background: transparent;
+  border: 2px solid rgba(255, 107, 107, 0.3);
+  opacity: 0;
+  z-index: -1;
+  animation: pulse-gamble 3s infinite;
+}
+
+@keyframes pulse-gamble {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  70% {
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
 .game-minimized .game-container {
   transform: translateY(105%); /* Move completely off-screen with extra margin */
   margin-top: 20px; /* Add extra margin to ensure it's offscreen */
@@ -1926,4 +1991,132 @@ h2 {
 
 .weapon-btn-compact.selected:hover {
   background: linear-gradient(135deg, #20c997, #28a745);
+}
+
+/* Upgrades Tab Styles */
+.upgrades-tab-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(20, 20, 50, 0.95);
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.upgrade-category-compact {
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(30, 30, 60, 0.8);
+  border-radius: 6px;
+  border: 1px solid rgba(100, 100, 200, 0.3);
+}
+
+.upgrade-category-compact h5 {
+  margin: 0 0 8px 0;
+  color: #FFD700;
+  font-size: 13px;
+  font-weight: bold;
+  text-shadow: 0 0 5px rgba(255, 215, 0, 0.5);
+}
+
+.upgrade-item-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  background: rgba(40, 40, 80, 0.6);
+  border-radius: 4px;
+  border: 1px solid rgba(150, 150, 255, 0.2);
+}
+
+.upgrade-item-compact span:first-child {
+  font-size: 11px;
+  font-weight: 500;
+  color: #E0E0FF;
+  flex: 1;
+}
+
+.upgrade-cost-compact {
+  font-size: 10px;
+  color: #FFD700;
+  margin: 0 8px;
+  font-weight: bold;
+  text-shadow: 0 0 3px rgba(255, 215, 0, 0.5);
+}
+
+.upgrade-btn-compact {
+  padding: 2px 8px;
+  font-size: 10px;
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: bold;
+  min-width: 40px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.upgrade-btn-compact:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0056b3, #007bff);
+  box-shadow: 0 0 8px rgba(0, 123, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.upgrade-btn-compact:disabled {
+  background: #555;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.upgrade-description-compact {
+  font-size: 9px;
+  color: #B0B0D0;
+  margin-top: 2px;
+  padding-left: 4px;
+  font-style: italic;
+  line-height: 1.2;
+}
+
+/* Enhanced upgrade section for defense tab */
+.upgrade-section-compact {
+  margin-top: 12px;
+  padding: 8px;
+  background: rgba(30, 30, 60, 0.9);
+  border-radius: 6px;
+  border: 1px solid rgba(100, 200, 100, 0.4);
+}
+
+.upgrade-title-compact {
+  font-size: 12px;
+  color: #90EE90;
+  font-weight: bold;
+  margin-bottom: 6px;
+  text-shadow: 0 0 5px rgba(144, 238, 144, 0.5);
+}
+
+.upgrade-actions-compact {
+  display: flex;
+  gap: 6px;
+}
+
+.deselect-btn-compact {
+  padding: 4px 8px;
+  font-size: 10px;
+  background: linear-gradient(135deg, #6c757d, #495057);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-weight: bold;
+}
+
+.deselect-btn-compact:hover {
+  background: linear-gradient(135deg, #495057, #6c757d);
+  box-shadow: 0 0 8px rgba(108, 117, 125, 0.4);
 }
