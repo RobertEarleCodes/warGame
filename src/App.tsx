@@ -2524,11 +2524,10 @@ function App() {
       }
     }
   };
-
   const placeTurret = (x: number, y: number) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = gameState.playerResources[gameState.players[playerIndex].id] || 0;
-      const TURRET_COST = 125;      if (myResources >= TURRET_COST) {
+      const TURRET_COST = 1000;if (myResources >= TURRET_COST) {
         socket.emit('place-turret', { gameId, x, y });
         triggerMoneyAnimation(TURRET_COST, x, y);
       }

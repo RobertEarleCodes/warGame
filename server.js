@@ -228,7 +228,7 @@ class Game {    constructor(id) {
         if (!player) return false;
 
         const playerIndex = this.players.findIndex(p => p.id === playerId);
-        const TURRET_COST = 200; // Increased cost to place a turret (was 125)
+        const TURRET_COST = 1000; // Increased cost to place a turret
         
         // Check if player has enough resources
         if (this.playerResources[playerId] < TURRET_COST) return false;
@@ -422,14 +422,17 @@ class Game {    constructor(id) {
                             minDist = dist;
                         }
                     }
-                    
-                    // Create turret attack animation
+                      // Create turret attack animation
                     this.createAttackAnimation(turret.x, turret.y, closest.x, closest.y, 'turret');
                     
-                    closest.health = Math.max(0, closest.health - turret.damage);
-                    turret.lastAttackTime = now;
-
-                    // Remove unit if dead
+                    // Apply damage with King resistance (King takes only 10% damage from turrets)
+                    let damage = turret.damage;
+                    if (closest.unitType === 'King') {
+                        damage = Math.max(1, Math.floor(damage * 0.1)); // King takes only 10% damage from turrets
+                    }
+                    
+                    closest.health = Math.max(0, closest.health - damage);
+                    turret.lastAttackTime = now;                    // Remove unit if dead
                     if (closest.health <= 0) {
                         const idx = this.units.indexOf(closest);
                         if (idx > -1) {
@@ -438,8 +441,9 @@ class Game {    constructor(id) {
                                 'Peasant': 10,
                                 'Knight': 40,
                                 'Archer': 80,
-                                'King': 150
-                            };                            const reward = unitReward[closest.unitType] || 10;
+                                'King': 150,
+                                'Wizard': 100
+                            };const reward = unitReward[closest.unitType] || 10;
                             this.playerResources[turret.playerId] = (this.playerResources[turret.playerId] || 0) + reward;
                             this.units.splice(idx, 1);
                         }
@@ -1188,11 +1192,13 @@ io.on('connection', (socket) => {
     socket.on('upgrade-turret', ({ gameId, turretId }) => {
         const game = games.get(gameId);
         const player = game?.players.find(p => p.id === socket.id);
-        
-        if (game && player) {
+          if (game && player) {
             const turret = game.turrets.find(t => t.id === turretId && t.playerId === player.id);
             const currentLevel = turret ? (turret.level || 1) : 1;
-            const upgradeCost = 150 * currentLevel; // Much more expensive, scales with level
+            
+            // Progressive upgrade costs: 2000, 4000, 7000, 10000
+            const upgradeCosts = [2000, 4000, 7000, 10000];
+            const upgradeCost = upgradeCosts[currentLevel - 1] || 10000;
             const playerResources = game.playerResources[player.id] || 0;
             
             if (turret && playerResources >= upgradeCost && currentLevel < 5) {
