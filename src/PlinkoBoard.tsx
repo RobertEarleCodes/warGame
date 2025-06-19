@@ -556,18 +556,33 @@ const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ onReward, playerResources }) 
   }, [isDropping, playerResources, dropCost]);
 
   // Handle canvas click
-  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleCanvasClick = useCallback((event: React.MouseEvent<HTMLCanvasElement | HTMLDivElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Only allow drops in the top area
-    if (y < 80) {
-      // Just drop a ball - we determine the position automatically
-      dropBall();
+    // Convert to canvas coordinates
+    const canvasX = (x / rect.width) * canvas.width;
+    const canvasY = (y / rect.height) * canvas.height;
+    
+    // Define the Plinko area boundaries (center area of screen)
+    const plinkoAreaLeft = canvas.width * 0.3;
+    const plinkoAreaRight = canvas.width * 0.7;
+    const plinkoAreaTop = 50;
+    const plinkoAreaBottom = canvas.height * 0.9;
+    
+    // Only respond to clicks within the Plinko area
+    if (canvasX >= plinkoAreaLeft && canvasX <= plinkoAreaRight && 
+        canvasY >= plinkoAreaTop && canvasY <= plinkoAreaBottom) {
+      // Only allow drops in the top area of the Plinko zone
+      if (canvasY < 80) {
+        dropBall();
+      }
     }
+    // Ignore clicks outside the Plinko area - let them pass through to game UI
   }, [dropBall]);
 
   return (
@@ -594,8 +609,13 @@ const PlinkoBoard: React.FC<PlinkoBoardProps> = ({ onReward, playerResources }) 
         width={window.innerWidth}
         height={window.innerHeight}
         className="plinko-canvas"
-        onClick={handleCanvasClick}
       />
+      
+      {/* Separate click zone for Plinko interaction */}
+      <div 
+        className="plinko-click-zone"
+        onClick={handleCanvasClick}
+      ></div>
       <div className="plinko-controls">
         <div className="plinko-info">
           <div className="player-balance">💰 Balance: <span className="balance-value">{playerResources}</span> coins</div>

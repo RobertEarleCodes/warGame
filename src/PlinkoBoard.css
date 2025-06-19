@@ -7,7 +7,7 @@
   z-index: -10; /* Place it behind everything else */
   overflow: hidden;
   background: linear-gradient(135deg, rgba(15,23,42,0.8) 0%, rgba(30,41,59,0.8) 50%, rgba(15,23,42,0.8) 100%);
-  pointer-events: auto;
+  pointer-events: none; /* Don't block clicks to game elements */
 }
 
 .plinko-canvas {
@@ -16,7 +16,10 @@
   cursor: crosshair;
   display: block;
   image-rendering: crisp-edges;
-  pointer-events: auto; /* Make sure clicks are registered */
+  position: relative;
+  z-index: -5; /* Lower than game elements */
+  /* Don't capture ANY pointer events - let them go to game UI */
+  pointer-events: none;
 }
 
 .plinko-controls {
@@ -342,6 +345,18 @@
   0% { transform: translateY(0px); }
   50% { transform: translateY(-10px); }
   100% { transform: translateY(0px); }
+}
+
+/* Plinko click zone styling */
+.plinko-click-zone {
+  position: absolute;
+  top: 0;
+  left: 30%;
+  right: 30%;
+  height: 100%;
+  pointer-events: auto;
+  cursor: crosshair;
+  z-index: -3; /* Above canvas but below game UI */
 }
 
 /* Responsive design */

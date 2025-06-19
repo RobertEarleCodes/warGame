@@ -65,7 +65,11 @@ class Game {
                 health: 1000,
                 maxHealth: 1000,
                 x: basePositions[this.players.length - 1],
-                y: 300 // Center of 600px height canvas (600/2 = 300)
+                y: 300, // Center of 600px height canvas (600/2 = 300)
+                level: 1,
+                weaponType: 'basic',
+                damage: 10,
+                attackRange: 120
             };
             this.playerSelectedLane[playerId] = 0; // Default lane
 
@@ -198,7 +202,8 @@ class Game {
             playerId: playerId,
             damage: 30,
             triggered: false,
-            type: 'spike' // Could have different trap types later
+            type: 'spike', // Could have different trap types later
+            level: 1
         };
 
         this.traps.push(trap);
@@ -242,7 +247,8 @@ class Game {
             attackRange: 140,
             attackCooldown: 800,
             lastAttackTime: 0,
-            type: 'turret'
+            type: 'turret',
+            level: 1
         };
 
         this.turrets.push(turret);
@@ -283,7 +289,8 @@ class Game {
             damage: 50,
             explosionRadius: 45,
             triggered: false,
-            type: 'mine'
+            type: 'mine',
+            level: 1
         };
 
         this.mines.push(mine);
@@ -937,6 +944,166 @@ io.on('connection', (socket) => {
             
             // Update the game state
             io.to(gameId).emit('game-updated', game.getGameState());
+        }
+    });
+
+    // Upgrade endpoints
+    socket.on('upgrade-castle', ({ gameId }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const playerBase = game.playerBases[player.id];
+            const currentLevel = playerBase.level || 1;
+            const upgradeCost = currentLevel * 200;
+            const playerResources = game.playerResources[player.id] || 0;
+            
+            if (currentLevel >= 5) {
+                socket.emit('castle-upgraded', { success: false, message: 'Castle is already at maximum level' });
+                return;
+            }
+            
+            if (playerResources >= upgradeCost) {
+                // Deduct resources
+                game.playerResources[player.id] -= upgradeCost;
+                
+                // Upgrade castle
+                playerBase.level = currentLevel + 1;
+                playerBase.maxHealth += 50;
+                playerBase.health = playerBase.maxHealth; // Full heal on upgrade
+                playerBase.damage = (playerBase.damage || 10) + 5;
+                playerBase.attackRange = (playerBase.attackRange || 120) + 10;
+                
+                console.log(`Player ${player.id} upgraded castle to level ${playerBase.level}`);
+                socket.emit('castle-upgraded', { success: true });
+                io.to(gameId).emit('game-updated', game.getGameState());
+            } else {
+                socket.emit('castle-upgraded', { success: false, message: 'Not enough resources' });
+            }
+        }
+    });
+
+    socket.on('change-castle-weapon', ({ gameId, weaponType }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const playerBase = game.playerBases[player.id];
+            const currentLevel = playerBase.level || 1;
+            
+            // Check if weapon is unlocked
+            const weaponRequirements = {
+                basic: 1,
+                arrows: 2,
+                trebuchet: 3,
+                wizard: 4
+            };
+            
+            if (currentLevel >= weaponRequirements[weaponType]) {
+                playerBase.weaponType = weaponType;
+                
+                // Adjust damage based on weapon type
+                const baseDamage = 10 + (currentLevel - 1) * 5;
+                switch (weaponType) {
+                    case 'basic':
+                        playerBase.damage = baseDamage;
+                        break;
+                    case 'arrows':
+                        playerBase.damage = baseDamage * 0.8; // Lower per arrow but multiple arrows
+                        break;
+                    case 'trebuchet':
+                        playerBase.damage = baseDamage * 1.5;
+                        break;
+                    case 'wizard':
+                        playerBase.damage = baseDamage * 1.2;
+                        break;
+                }
+                
+                console.log(`Player ${player.id} changed castle weapon to ${weaponType}`);
+                io.to(gameId).emit('game-updated', game.getGameState());
+            }
+        }
+    });
+
+    socket.on('upgrade-turret', ({ gameId, turretId }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const turret = game.turrets.find(t => t.id === turretId && t.playerId === player.id);
+            const upgradeCost = 100;
+            const playerResources = game.playerResources[player.id] || 0;
+            
+            if (turret && playerResources >= upgradeCost) {
+                // Deduct resources
+                game.playerResources[player.id] -= upgradeCost;
+                
+                // Upgrade turret
+                turret.damage = Math.round(turret.damage * 1.5);
+                turret.attackRange = Math.round(turret.attackRange * 1.2);
+                turret.maxHealth = Math.round(turret.maxHealth * 1.3);
+                turret.health = turret.maxHealth; // Full heal on upgrade
+                turret.level = (turret.level || 1) + 1;
+                
+                console.log(`Player ${player.id} upgraded turret ${turretId}`);
+                socket.emit('turret-upgraded', { success: true });
+                io.to(gameId).emit('game-updated', game.getGameState());
+            } else {
+                socket.emit('turret-upgraded', { success: false, message: turret ? 'Not enough resources' : 'Turret not found' });
+            }
+        }
+    });
+
+    socket.on('upgrade-trap', ({ gameId, trapId }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const trap = game.traps.find(t => t.id === trapId && t.playerId === player.id);
+            const upgradeCost = 75;
+            const playerResources = game.playerResources[player.id] || 0;
+            
+            if (trap && playerResources >= upgradeCost) {
+                // Deduct resources
+                game.playerResources[player.id] -= upgradeCost;
+                
+                // Upgrade trap
+                trap.damage = Math.round(trap.damage * 1.5);
+                trap.level = (trap.level || 1) + 1;
+                
+                console.log(`Player ${player.id} upgraded trap ${trapId}`);
+                socket.emit('trap-upgraded', { success: true });
+                io.to(gameId).emit('game-updated', game.getGameState());
+            } else {
+                socket.emit('trap-upgraded', { success: false, message: trap ? 'Not enough resources' : 'Trap not found' });
+            }
+        }
+    });
+
+    socket.on('upgrade-mine', ({ gameId, mineId }) => {
+        const game = games.get(gameId);
+        const player = game?.players.find(p => p.id === socket.id);
+        
+        if (game && player) {
+            const mine = game.mines.find(m => m.id === mineId && m.playerId === player.id);
+            const upgradeCost = 100;
+            const playerResources = game.playerResources[player.id] || 0;
+            
+            if (mine && playerResources >= upgradeCost) {
+                // Deduct resources
+                game.playerResources[player.id] -= upgradeCost;
+                
+                // Upgrade mine
+                mine.damage = Math.round(mine.damage * 1.5);
+                mine.explosionRadius = Math.round(mine.explosionRadius * 1.2);
+                mine.level = (mine.level || 1) + 1;
+                
+                console.log(`Player ${player.id} upgraded mine ${mineId}`);
+                socket.emit('mine-upgraded', { success: true });
+                io.to(gameId).emit('game-updated', game.getGameState());
+            } else {
+                socket.emit('mine-upgraded', { success: false, message: mine ? 'Not enough resources' : 'Mine not found' });
+            }
         }
     });
 

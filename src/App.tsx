@@ -106,7 +106,10 @@ function App() {
   const [playerIndex, setPlayerIndex] = useState<number>(-1);
   const [plinkoReward, setPlinkoReward] = useState(0);
   const [placementMode, setPlacementMode] = useState<'trap' | 'turret' | 'mine'>('trap');
-  const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info'>('units');
+  const [activeTab, setActiveTab] = useState<'units' | 'defense' | 'info' | 'castle'>('units');
+  const [selectedTurret, setSelectedTurret] = useState<string | null>(null);
+  const [selectedTrap, setSelectedTrap] = useState<string | null>(null);
+  const [selectedMine, setSelectedMine] = useState<string | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 600 });
   const [isMinimized, setIsMinimized] = useState(false); // Keep as false by default
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -231,6 +234,43 @@ function App() {
 
       newSocket.on('player-disconnected', (data) => {
         alert(`Player ${data.disconnectedPlayer + 1} disconnected`);
+      });
+
+      newSocket.on('castle-upgraded', (data) => {
+        if (data.success) {
+          // We'll add toast notifications later if needed
+          console.log('Castle upgraded successfully!');
+        } else {
+          console.log('Failed to upgrade castle:', data.message);
+        }
+      });
+
+      newSocket.on('turret-upgraded', (data) => {
+        if (data.success) {
+          console.log('Turret upgraded successfully!');
+        } else {
+          console.log('Failed to upgrade turret:', data.message);
+        }
+      });
+
+      newSocket.on('trap-upgraded', (data) => {
+        if (data.success) {
+          console.log('Trap upgraded successfully!');
+        } else {
+          console.log('Failed to upgrade trap:', data.message);
+        }
+      });
+
+      newSocket.on('mine-upgraded', (data) => {
+        if (data.success) {
+          console.log('Mine upgraded successfully!');
+        } else {
+          console.log('Failed to upgrade mine:', data.message);
+        }
+      });
+
+      newSocket.on('powerup-purchased', () => {
+        console.log('Powerup purchased successfully!');
       });
 
       return () => {
@@ -1124,6 +1164,22 @@ function App() {
             const player = gameState.players.find(p => p.id === trap.playerId);
             if (!player) return;
 
+            // Draw selection highlight for owned traps
+            const isSelected = selectedTrap === trap.id;
+            const isOwned = trap.playerId === gameState.players[playerIndex]?.id;
+            
+            if (isSelected || (isOwned && !selectedTurret && !selectedTrap && !selectedMine)) {
+              ctx.save();
+              ctx.strokeStyle = isSelected ? '#00ff00' : '#ffff00';
+              ctx.lineWidth = 3;
+              ctx.globalAlpha = 0.7;
+              ctx.beginPath();
+              ctx.arc(trap.x, trap.y, 20, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+              ctx.restore();
+            }
+
             // Draw trap as a spiky circle
             ctx.save();
             ctx.fillStyle = player.color;
@@ -1169,6 +1225,22 @@ function App() {
         gameState.turrets.forEach(turret => {
           const player = gameState.players.find(p => p.id === turret.playerId);
           if (!player) return;
+
+          // Draw selection highlight for owned turrets
+          const isSelected = selectedTurret === turret.id;
+          const isOwned = turret.playerId === gameState.players[playerIndex]?.id;
+          
+          if (isSelected || (isOwned && !selectedTurret && !selectedTrap && !selectedMine)) {
+            ctx.save();
+            ctx.strokeStyle = isSelected ? '#00ff00' : '#ffff00';
+            ctx.lineWidth = 3;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.arc(turret.x, turret.y, 25, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+            ctx.restore();
+          }
 
           // Draw turret body (rectangular base)
           ctx.save();
@@ -1221,6 +1293,22 @@ function App() {
           if (!mine.triggered) {
             const player = gameState.players.find(p => p.id === mine.playerId);
             if (!player) return;
+
+            // Draw selection highlight for owned mines
+            const isSelected = selectedMine === mine.id;
+            const isOwned = mine.playerId === gameState.players[playerIndex]?.id;
+            
+            if (isSelected || (isOwned && !selectedTurret && !selectedTrap && !selectedMine)) {
+              ctx.save();
+              ctx.strokeStyle = isSelected ? '#00ff00' : '#ffff00';
+              ctx.lineWidth = 3;
+              ctx.globalAlpha = 0.7;
+              ctx.beginPath();
+              ctx.arc(mine.x, mine.y, 18, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.globalAlpha = 1.0;
+              ctx.restore();
+            }
 
             // Draw mine as a circular shape with warning pattern
             ctx.save();
@@ -1422,7 +1510,8 @@ function App() {
                 // Shockwave rings
                 for (let ring = 0; ring < 3; ring++) {
                   const ringRadius = (10 + ring * 8) * (1 + impactIntensity * 0.5);
-                  const ringAlpha = (0.6 - ring * 0.2) * impactIntensity;
+                  // Ring animation effect (visual only)
+                
                   
                   ctx.shadowColor = '#00FFFF';
                   ctx.shadowBlur = 20;
@@ -1558,6 +1647,46 @@ function App() {
     }
   };
 
+  const getMySelectedLane = (): number => {
+    if (!gameState || playerIndex < 0) return 0;
+    const playerId = gameState.players[playerIndex]?.id;
+    return gameState.playerSelectedLane[playerId] || 0;
+  };
+
+  const selectLane = (lane: number) => {
+    if (socket && gameId && gameState && playerIndex >= 0) {
+      socket.emit('select-lane', { gameId, lane });
+    }
+  };
+
+  const getMyBaseHealth = () => {
+    if (!gameState || playerIndex < 0) return { health: 0, maxHealth: 100, level: 1, weaponType: 'basic', damage: 10, attackRange: 120 };
+    const playerId = gameState.players[playerIndex]?.id;
+    const base = gameState.playerBases[playerId];
+    if (!base) return { health: 0, maxHealth: 100, level: 1, weaponType: 'basic', damage: 10, attackRange: 120 };
+    
+    // Extract level and weapon info from base or default values
+    return {
+      health: base.health,
+      maxHealth: base.maxHealth,
+      level: (base as any).level || 1,
+      weaponType: (base as any).weaponType || 'basic',
+      damage: (base as any).damage || 10,
+      attackRange: (base as any).attackRange || 120
+    };
+  };
+
+  const getProduction = (): number => {
+    if (!gameState || playerIndex < 0) return 0;
+    // Calculate production based on peasants or other factors
+    const myUnits = gameState.units.filter(unit => unit.playerId === gameState.players[playerIndex]?.id);
+    const peasants = myUnits.filter(unit => unit.unitType === 'Peasant');
+    return peasants.length * 2; // 2 resources per peasant per second
+  };
+
+  // Constants for lanes
+  const LANES = [0, 1, 2, 3, 4];
+
   const spawnUnit = (unitType: string) => {
     if (socket && gameId && gameState && playerIndex >= 0) {
       const myResources = gameState.playerResources[gameState.players[playerIndex].id] || 0;
@@ -1628,64 +1757,94 @@ function App() {
     
     const gameX = canvasX / scaleX;
     const gameY = canvasY / scaleY;
-    
-    // Check if click is on player's own half using standard game dimensions
-    const playerHalfStart = playerIndex === 0 ? 0 : STANDARD_WIDTH / 2;
-    const playerHalfEnd = playerIndex === 0 ? STANDARD_WIDTH / 2 : STANDARD_WIDTH;
-    
-    if (gameX >= playerHalfStart && gameX <= playerHalfEnd) {
-      // Place structure based on current placement mode using game coordinates
-      if (placementMode === 'trap') {
-        placeTrap(gameX, gameY);
-      } else if (placementMode === 'turret') {
-        placeTurret(gameX, gameY);
-      } else if (placementMode === 'mine') {
-        placeMine(gameX, gameY);
-      }
+
+    // Check if clicking on a turret for upgrade
+    const clickedTurret = gameState.turrets.find(turret => {
+      const distance = Math.sqrt((turret.x - gameX) ** 2 + (turret.y - gameY) ** 2);
+      return distance < 30 && turret.playerId === gameState.players[playerIndex].id;
+    });
+
+    if (clickedTurret) {
+      setSelectedTurret(clickedTurret.id);
+      setSelectedTrap(null);
+      setSelectedMine(null);
+      return;
+    }
+
+    // Check if clicking on a trap for upgrade
+    const clickedTrap = gameState.traps.find(trap => {
+      const distance = Math.sqrt((trap.x - gameX) ** 2 + (trap.y - gameY) ** 2);
+      return distance < 30 && trap.playerId === gameState.players[playerIndex].id;
+    });
+
+    if (clickedTrap) {
+      setSelectedTrap(clickedTrap.id);
+      setSelectedTurret(null);
+      setSelectedMine(null);
+      return;
+    }
+
+    // Check if clicking on a mine for upgrade
+    const clickedMine = gameState.mines.find(mine => {
+      const distance = Math.sqrt((mine.x - gameX) ** 2 + (mine.y - gameY) ** 2);
+      return distance < 30 && mine.playerId === gameState.players[playerIndex].id;
+    });
+
+    if (clickedMine) {
+      setSelectedMine(clickedMine.id);
+      setSelectedTurret(null);
+      setSelectedTrap(null);
+      return;
+    }
+
+    // Clear selections if clicking elsewhere
+    setSelectedTurret(null);
+    setSelectedTrap(null);
+    setSelectedMine(null);
+
+    // Place defensive items based on mode
+    if (placementMode === 'trap') {
+      placeTrap(gameX, gameY);
+    } else if (placementMode === 'turret') {
+      placeTurret(gameX, gameY);
+    } else if (placementMode === 'mine') {
+      placeMine(gameX, gameY);
     }
   };
-
-
-
-  const LANES = [0, 1, 2];
-
-  const selectLane = (lane: number) => {
-    if (socket && gameId && gameState && playerIndex >= 0) {
-      socket.emit('select-lane', { gameId, lane });
-    }
-  };
-
-  const getMySelectedLane = () => {
-    if (
-      !gameState ||
-      playerIndex < 0 ||
-      !gameState.playerSelectedLane ||
-      !gameState.players[playerIndex]
-    ) return 0;
-    return gameState.playerSelectedLane[gameState.players[playerIndex].id] || 0;
-  };
-
-  const mySelectedLane = getMySelectedLane();
 
   const getMyResources = () => {
     if (!gameState || playerIndex < 0) return 0;
     return gameState.playerResources[gameState.players[playerIndex].id] || 0;
   };
 
-  const getMyBaseHealth = () => {
-    if (!gameState || playerIndex < 0) return { health: 0, maxHealth: 0 };
-    const myBase = gameState.playerBases[gameState.players[playerIndex].id];
-    return myBase || { health: 0, maxHealth: 0 };
+  const upgradeCastle = () => {
+    if (socket && gameId) {
+      socket.emit('upgrade-castle', { gameId });
+    }
   };
 
-  const getProduction = () => {
-    if (!gameState) return 0;
-    // All players share the same production rate (from server)
-    // If you want to show per-player, adjust accordingly
-    // The server sends resourceGenerationRate as a property of the game, so you need to add it to GameState and server getGameState()
-    // For now, just hardcode 25 or show a placeholder if not available
-    // If you want to show the real value, see the note below
-    return (gameState as any).resourceGenerationRate || 25;
+  const upgradeTurret = (turretId: string) => {
+    if (socket && gameId) {
+      socket.emit('upgrade-turret', { gameId, turretId });
+    }
+  };
+
+  const upgradeTrap = (trapId: string) => {
+    if (socket && gameId) {
+      socket.emit('upgrade-trap', { gameId, trapId });
+    }
+  };
+
+  const upgradeMine = (mineId: string) => {
+    if (socket && gameId) {
+      socket.emit('upgrade-mine', { gameId, mineId });
+    }
+  };
+
+  const changeCastleWeapon = (weaponType: 'basic' | 'trebuchet' | 'wizard' | 'arrows') => {
+    if (socket && gameId) {
+      socket.emit('change-castle-weapon', { gameId, weaponType });
+    }
   };
 
   // Debug info
@@ -1705,7 +1864,7 @@ function App() {
     <div className={`app ${isMinimized ? 'game-minimized' : 'game-maximized'}`}>
       {/* Plinko Board as interactive background */}
       <PlinkoBoard 
-        playerResources={gameState ? getMyResources() : 0}
+        playerResources={gameState ? getMyResources() :  0}
         onReward={(multiplier, amount) => {
           if (gameState && playerIndex >= 0) {
             // Handle both costs and winnings
@@ -1809,6 +1968,12 @@ function App() {
                     🛡️
                   </button>
                   <button 
+                    className={`tab-btn-compact ${activeTab === 'castle' ? 'active' : ''}`}
+                    onClick={() => setActiveTab('castle')}
+                  >
+                    🏰
+                  </button>
+                  <button 
                     className={`tab-btn-compact ${activeTab === 'info' ? 'active' : ''}`}
                     onClick={() => setActiveTab('info')}
                   >
@@ -1887,7 +2052,7 @@ function App() {
                           {LANES.map((lane) => (
                             <button
                               key={lane}
-                              className={`lane-btn-compact${mySelectedLane === lane ? ' selected' : ''}`}
+                              className={`lane-btn-compact${getMySelectedLane() === lane ? ' selected' : ''}`}
                               onClick={() => selectLane(lane)}
                             >
                               {lane + 1}
@@ -1935,6 +2100,124 @@ function App() {
                             onClick={() => setPlacementMode('mine')}
                           >
                             {placementMode === 'mine' ? '✓' : 'Select'}
+                          </button>
+                        </div>
+                      </div>
+                      
+                      {/* Upgrade sections */}
+                      {selectedTurret && (
+                        <div className="upgrade-section-compact">
+                          <div className="upgrade-title-compact">🗼 Selected Turret</div>
+                          <div className="upgrade-actions-compact">
+                            <button
+                              className="upgrade-btn-compact"
+                              onClick={() => upgradeTurret(selectedTurret)}
+                            >
+                              ⬆️ Upgrade
+                            </button>
+                            <button
+                              className="deselect-btn-compact"
+                              onClick={() => setSelectedTurret(null)}
+                            >
+                              ✖️ Deselect
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedTrap && (
+                        <div className="upgrade-section-compact">
+                          <div className="upgrade-title-compact">🕳️ Selected Trap</div>
+                          <div className="upgrade-actions-compact">
+                            <button
+                              className="upgrade-btn-compact"
+                              onClick={() => upgradeTrap(selectedTrap)}
+                            >
+                              ⬆️ Upgrade
+                            </button>
+                            <button
+                              className="deselect-btn-compact"
+                              onClick={() => setSelectedTrap(null)}
+                            >
+                              ✖️ Deselect
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {selectedMine && (
+                        <div className="upgrade-section-compact">
+                          <div className="upgrade-title-compact">💣 Selected Mine</div>
+                          <div className="upgrade-actions-compact">
+                            <button
+                              className="upgrade-btn-compact"
+                              onClick={() => upgradeMine(selectedMine)}
+                            >
+                              ⬆️ Upgrade
+                            </button>
+                            <button
+                              className="deselect-btn-compact"
+                              onClick={() => setSelectedMine(null)}
+                            >
+                              ✖️ Deselect
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'castle' && (
+                    <div className="castle-tab-compact">
+                      <div className="castle-info-compact">
+                        <div className="castle-title-compact">🏰 Castle Level {getMyBaseHealth().level}</div>
+                        <div className="castle-stats-compact">
+                          <div className="castle-stat-compact">❤️ {getMyBaseHealth().health}/{getMyBaseHealth().maxHealth}</div>
+                          <div className="castle-stat-compact">⚔️ {getMyBaseHealth().damage}</div>
+                          <div className="castle-stat-compact">🎯 {getMyBaseHealth().attackRange}</div>
+                          <div className="castle-stat-compact">🛡️ {getMyBaseHealth().weaponType}</div>
+                        </div>
+                      </div>
+                      
+                      <div className="castle-upgrade-compact">
+                        <button
+                          className="castle-upgrade-btn-compact"
+                          onClick={upgradeCastle}
+                          disabled={getMyBaseHealth().level >= 5 || getMyResources() < (getMyBaseHealth().level || 1) * 200}
+                        >
+                          {getMyBaseHealth().level >= 5 ? '🏆 Max Level' : `⬆️ Upgrade (${(getMyBaseHealth().level || 1) * 200})`}
+                        </button>
+                      </div>
+                      
+                      <div className="weapon-selection-compact">
+                        <div className="weapon-title-compact">🗡️ Weapons</div>
+                        <div className="weapon-buttons-compact">
+                          <button
+                            className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'basic' ? 'selected' : ''}`}
+                            onClick={() => changeCastleWeapon('basic')}
+                          >
+                            🏹 Basic
+                          </button>
+                          <button
+                            className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'arrows' ? 'selected' : ''}`}
+                            onClick={() => changeCastleWeapon('arrows')}
+                            disabled={getMyBaseHealth().level < 2}
+                          >
+                            🏹 Multi
+                          </button>
+                          <button
+                            className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'trebuchet' ? 'selected' : ''}`}
+                            onClick={() => changeCastleWeapon('trebuchet')}
+                            disabled={getMyBaseHealth().level < 3}
+                          >
+                            🏰 Trebuchet
+                          </button>
+                          <button
+                            className={`weapon-btn-compact ${getMyBaseHealth().weaponType === 'wizard' ? 'selected' : ''}`}
+                            onClick={() => changeCastleWeapon('wizard')}
+                            disabled={getMyBaseHealth().level < 4}
+                          >
+                            🔮 Magic
                           </button>
                         </div>
                       </div>
@@ -1990,7 +2273,7 @@ function App() {
       {gameState && (
         <RouletteWheel 
           playerResources={getMyResources()}
-          onSpin={(result, winnings) => {
+          onSpin={(_, winnings) => {
             if (winnings > 0) {
               socket?.emit('roulette-win', { 
                 gameId, 
@@ -1999,7 +2282,7 @@ function App() {
               });
             }
           }}
-          onBet={(betAmount, betType, betValue) => {
+          onBet={(betAmount, _, __) => {
             socket?.emit('roulette-bet', { 
               gameId, 
               playerId: gameState.players[playerIndex].id, 

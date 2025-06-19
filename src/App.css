@@ -980,6 +980,7 @@ h2 {
   background: transparent;
   transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   will-change: transform;
+  pointer-events: auto; /* Ensure clicks work on game elements */
 }
 
 .game-container::before {
@@ -1011,6 +1012,7 @@ h2 {
   position: relative;
   z-index: 1;
   box-shadow: 0 0 50px rgba(0, 0, 0, 0.3);
+  pointer-events: auto; /* Ensure clicks work on side panel */
 }
 
 .side-panel::before {
@@ -1744,4 +1746,184 @@ h2 {
 /* Ensure the roulette wheel stays visible when game is minimized */
 .game-minimized .roulette-container {
   z-index: 1001 !important; /* Keep roulette above everything when game is minimized */
+}
+
+/* Upgrade UI Styles */
+.upgrade-section-compact {
+  background: rgba(131, 56, 236, 0.1);
+  border: 1px solid rgba(131, 56, 236, 0.3);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 8px;
+}
+
+.upgrade-title-compact {
+  font-size: 12px;
+  font-weight: 600;
+  color: #8338ec;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.upgrade-actions-compact {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.upgrade-btn-compact {
+  background: linear-gradient(135deg, #28a745, #20c997);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+}
+
+.upgrade-btn-compact:hover {
+  background: linear-gradient(135deg, #20c997, #28a745);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
+}
+
+.deselect-btn-compact {
+  background: linear-gradient(135deg, #6c757d, #495057);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+}
+
+.deselect-btn-compact:hover {
+  background: linear-gradient(135deg, #495057, #6c757d);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(108, 117, 125, 0.3);
+}
+
+/* Castle Tab Styles */
+.castle-tab-compact {
+  padding: 8px;
+}
+
+.castle-info-compact {
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+
+.castle-title-compact {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffc107;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.castle-stats-compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.castle-stat-compact {
+  font-size: 10px;
+  color: #ffffff;
+  text-align: center;
+  padding: 2px 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.castle-upgrade-compact {
+  margin-bottom: 8px;
+}
+
+.castle-upgrade-btn-compact {
+  width: 100%;
+  background: linear-gradient(135deg, #8338ec, #3a86ff);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.castle-upgrade-btn-compact:hover:not(:disabled) {
+  background: linear-gradient(135deg, #3a86ff, #8338ec);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(131, 56, 236, 0.3);
+}
+
+.castle-upgrade-btn-compact:disabled {
+  background: linear-gradient(135deg, #6c757d, #495057);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.weapon-selection-compact {
+  background: rgba(255, 0, 110, 0.1);
+  border: 1px solid rgba(255, 0, 110, 0.3);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.weapon-title-compact {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ff006e;
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.weapon-buttons-compact {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.weapon-btn-compact {
+  background: linear-gradient(135deg, #ff006e, #8338ec);
+  border: none;
+  border-radius: 4px;
+  padding: 6px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.weapon-btn-compact:hover:not(:disabled) {
+  background: linear-gradient(135deg, #8338ec, #ff006e);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(255, 0, 110, 0.3);
+}
+
+.weapon-btn-compact:disabled {
+  background: linear-gradient(135deg, #6c757d, #495057);
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.weapon-btn-compact.selected {
+  background: linear-gradient(135deg, #28a745, #20c997);
+  box-shadow: 0 0 10px rgba(40, 167, 69, 0.5);
+}
+
+.weapon-btn-compact.selected:hover {
+  background: linear-gradient(135deg, #20c997, #28a745);
 }
