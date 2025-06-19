@@ -6,6 +6,7 @@
     "dev": "concurrently \"npm run server\" \"vite\"",
     "dev:host": "concurrently \"npm run server\" \"vite --host\"",
     "build": "tsc -b && vite build",
+    "build:esbuild": "tsc && esbuild src/main.tsx --bundle --outfile=dist/main.js --loader:.tsx=tsx --loader:.ts=tsx",
     "build:render": "rm -rf node_modules package-lock.json && npm install && npm run build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -23,10 +24,12 @@
     "socket.io-client": "^4.8.1"
   },  "devDependencies": {
     "@eslint/js": "^9.25.0",
+    "@rollup/rollup-linux-x64-gnu": "^4.21.2",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "concurrently": "^9.1.2",
+    "esbuild": "^0.19.12",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
