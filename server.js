@@ -24,8 +24,13 @@ const io = new Server(server, {
 // Serve static files from the dist directory
 app.use(express.static(join(__dirname, 'dist')));
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
 // Catch-all handler: send back React's index.html file for any non-API routes
-app.get('*', (req, res) => {
+app.get('/', (req, res) => {
     res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 
