@@ -3,7 +3,7 @@ services:
     name: wargame
     runtime: node
     plan: free
-    buildCommand: rm -rf node_modules package-lock.json && npm install --no-optional && npm run build
+    buildCommand: chmod +x build.sh && ./build.sh
     startCommand: npm start
     envVars:
       - key: NODE_ENV
